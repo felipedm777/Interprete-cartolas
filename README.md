@@ -14,3 +14,10 @@ Las cartolas contienen datos reales de clientes, así que:
 
 - Los PDF de `Training Data`, los archivos de `Example` y sus copias anonimizadas no se suben a este repositorio.
 - Antes de trabajar con ellas se reemplazan los nombres y RUT de los clientes en copias anonimizadas. El mapeo entre datos reales y ficticios queda solo en el computador local.
+
+## Estructura
+
+- `skill/`: la skill (`SKILL.md`) y el paquete Python `cartolas` que lee las cartolas y escribe los archivos de salida.
+- `docs/formato-salida.md`: formato de los archivos de saldos y movimientos, tomado del export de ejemplo.
+- `docs/inventario.md`: formatos de cartola encontrados, cómo extraerlos y validarlos, y preguntas abiertas. El detalle por institución está en `docs/instituciones/`.
+- `tests/`: pruebas (`python3 -m pytest tests`).

@@ -22,7 +22,7 @@ Nombre de archivo: `<ARCHIVO>_<portafolio>_<AAAAMMDD>_V2.csv`, por ejemplo `SALD
 - Fin de línea CRLF, también después de la última fila.
 - Codificación Windows-1252 (`cp1252`), salvo `MOVIMIENTOS_PERSHING`, que viene en UTF-8. Ninguno trae BOM.
 - `FechaProceso` en formato `AAAA-MM-DD`; es la misma fecha en todas las filas.
-- Números con coma decimal, sin separador de miles y con una cantidad fija de decimales por columna (tabla abajo). Cuando el valor absoluto es menor que 1 se omite el cero: `,042289`, `,00`. Negativos con `-` adelante: `-1234,500000`.
+- Números con coma decimal, sin separador de miles y con una cantidad fija de decimales por columna (tabla abajo). Cuando el valor absoluto es menor que 1 se omite el cero: `,012345`, `,00`. Negativos con `-` adelante: `-1234,500000`.
 - `RutCliente` con guion y sin puntos: `12345678-9`, `1234567-K`.
 - Las columnas de texto vacías quedan sin contenido (`;;`).
 

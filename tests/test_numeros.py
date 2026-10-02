@@ -38,8 +38,8 @@ def test_leer_monto_rechaza_basura(texto):
 @pytest.mark.parametrize(
     "valor, decimales, esperado",
     [
-        (Decimal("3056889"), 6, "3056889,000000"),
-        (Decimal("0.042289"), 6, ",042289"),
+        (Decimal("1234567"), 6, "1234567,000000"),
+        (Decimal("0.012345"), 6, ",012345"),
         (Decimal("0"), 2, ",00"),
         (Decimal("-12345.6789"), 6, "-12345,678900"),
         (Decimal("-0.5"), 2, "-,50"),

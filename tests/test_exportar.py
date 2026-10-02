@@ -16,13 +16,13 @@ def test_encabezado_y_fin_de_linea(tmp_path):
     ruta = tmp_path / "s.csv"
     escribir(
         SALDOS_CAJA,
-        [{"FechaProceso": "2026-09-22", "PatrimonioEnMonedaValoracion": Decimal("40")}],
+        [{"FechaProceso": "2026-09-22", "PatrimonioEnMonedaValoracion": Decimal("1234")}],
         ruta,
     )
     contenido = ruta.read_bytes()
     lineas = contenido.split(b"\r\n")
     assert lineas[0].decode() == ";".join(SALDOS_CAJA.encabezados)
-    assert lineas[1].startswith(b"2026-09-22;;;;;;;40,000000;")
+    assert lineas[1].startswith(b"2026-09-22;;;;;;;1234,000000;")
     assert contenido.endswith(b"\r\n") and b"\n" not in contenido.replace(b"\r\n", b"")
 
 

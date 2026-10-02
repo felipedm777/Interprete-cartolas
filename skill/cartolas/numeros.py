@@ -31,7 +31,7 @@ def leer_monto(texto: str, decimal: str = ",") -> Decimal:
 
 
 def escribir_numero(valor: Decimal | int | float | str | None, decimales: int) -> str:
-    """Escribe un número como el export de ejemplo: 1234,500000 o ,042289.
+    """Escribe un número como el export de ejemplo: 1234,500000 o ,012345.
 
     Coma decimal, sin separador de miles, decimales fijos y sin el cero antes
     de la coma cuando el valor absoluto es menor que 1. Vacío si no hay valor.
