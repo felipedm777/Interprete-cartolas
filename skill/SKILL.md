@@ -5,7 +5,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 
 # Intérprete de cartolas
 
-**Estado:** lee las cartolas BICE nuevas (formato de septiembre de 2026). Los otros cinco formatos del inventario (`docs/inventario.md`) todavía no tienen extractor y quedan en el reporte como no reconocidos.
+**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas y la cartola Valores Security que viene pegada a ellas. Larrainvial, Sura y Pershing todavía no tienen extractor y quedan en el reporte como no reconocidos (`docs/inventario.md`).
 
 ## Cómo usarla
 
@@ -15,19 +15,21 @@ Desde la carpeta `skill/`:
 python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD]
 ```
 
-- Escribe `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING` como `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv`, y `REPORTE_<código>_<AAAAMMDD>.md`.
-- El código sale del nombre de los PDF (`CARTOLA_<código>_...`) y la fecha es el último cierre de las cartolas, salvo que se indiquen.
-- `--solo-afi` exporta solo los portafolios de AFI Trading.
-- Termina con código 1 si alguna cartola no se pudo leer o tiene cuadraturas que no cierran.
+- Escribe un juego de 7 archivos por institución: `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING`. Los de BICE se llaman `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv` y los de otras instituciones `<ARCHIVO>_<INSTITUCIÓN>_<AAAAMMDD>_V2.csv` (p. ej. `SALDOS_CAJA_SECURITY_20260430_V2.csv`). Además deja un `REPORTE_<juegos>_<AAAAMMDD>.md`.
+- El código sale del nombre de los PDF (`CARTOLA_<código>_...`; si no lo trae, `BICE`) y la fecha de cada juego es el último cierre de sus cartolas, salvo que se indiquen.
+- Un PDF puede traer dos cartolas (BICE antigua + Security): cada una sale en el juego de su institución. Los PDF con el mismo contenido se procesan una sola vez.
+- Si una cartola no trae tipo de cambio (BICE antigua), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
+- `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
+- Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
 
 Después de correrla, revisar el reporte: cada cartola con una cuadratura que no cierra debe mirarse contra el PDF antes de usar sus filas.
 
 ## Cómo funciona
 
-1. `extractores.detectar` identifica el formato por el contenido del PDF, no por el nombre del archivo.
+1. `extractores.detectar` identifica por el contenido, no por el nombre del archivo, qué cartolas trae el PDF y en qué páginas.
 2. El extractor lee los textos con coordenadas (`pdf.py`), arma las tablas por los encabezados y devuelve una `Cartola` (`modelo.py`) con cuentas, caja, posiciones, movimientos y los totales impresos.
-3. `validar.py` compara lo extraído con los totales de la cartola: sumas por cuenta, grupo y sección, caja, y cantidad × precio en cada posición y movimiento.
-4. `salida.py` completa con la tabla maestra (`catalogo.py`, `datos/instrumentos.csv` y `datos/alias.csv`) el nemotécnico, emisor, producto y archivo de cada instrumento, y con el número de cuenta el producto base, el tipo de APV y el régimen.
+3. Cada extractor deja sus cuadraturas contra los totales impresos, y `validar.py` agrega las comunes: cantidad × precio en cada posición y movimiento, y las sumas por cuenta y sección cuando la cartola las trae.
+4. `salida.py` completa con la tabla maestra (`catalogo.py`, `datos/instrumentos.csv` y `datos/alias.csv`) el nemotécnico, emisor, producto y archivo de cada instrumento, y con el número de cuenta el producto base, el tipo de APV y el régimen (las cartolas que no son de BICE los traen en la cuenta).
 5. `exportar.py` escribe los CSV con el formato exacto del export (`formato.py`, `docs/formato-salida.md`).
 
 ## Mantener la tabla maestra

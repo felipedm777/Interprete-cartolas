@@ -24,7 +24,7 @@ Las cartolas contienen datos reales de clientes, así que:
 
 ## Uso
 
-Por ahora lee las cartolas BICE nuevas (septiembre de 2026 en adelante); los demás formatos quedan en el reporte como no reconocidos.
+Por ahora lee las cartolas BICE nuevas (septiembre de 2026 en adelante), las BICE antiguas y la cartola Valores Security que viene pegada a ellas; Larrainvial, Sura y Pershing quedan en el reporte como no reconocidos.
 
 ```
 pip install -r requirements.txt
@@ -32,4 +32,4 @@ cd skill
 python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>"
 ```
 
-Deja en la carpeta de salida los 7 CSV y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.
+Deja en la carpeta de salida un juego de 7 CSV por institución y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.

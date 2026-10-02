@@ -54,7 +54,8 @@ TIPOS_CAJA = {
 }
 
 # TIPO MOVTO del informe de transacciones (viene truncado) -> (tipo, destino).
-# Los dividendos no se exportan como títulos: ya están en los movimientos de caja.
+# Los dividendos no se exportan como títulos: los de CFI y acciones ya están en
+# los movimientos de caja, y los de fondos mutuos se reinvierten en cuotas.
 TIPOS_TITULOS = {
     "inversion": ("INVERSION FM", "FFMM"),
     "rescate": ("RESCATE FM", "FFMM"),
@@ -199,6 +200,11 @@ def _filas(spans: list[Span]) -> list[list[Span]]:
     return [sorted(f, key=lambda s: s.x0) for f in filas]
 
 
+def _etiqueta(fila: list[Span]) -> str:
+    """Texto de la izquierda de una fila de los resúmenes de las páginas 1 y 2."""
+    return re.sub(r"\s+", " ", " ".join(s.texto for s in fila if s.x1 < 200))
+
+
 def _normalizar(texto: str) -> str:
     sin_tildes = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
     return re.sub(r"\s+", " ", sin_tildes).strip().lower()
@@ -239,7 +245,7 @@ def _resumen_inversion(spans: list[Span], lector: "_Lector") -> None:
     grupos: dict[str, list[Decimal]] = {}
     grupo = None
     for fila in _filas([s for s in spans if s.x1 < 420]):
-        etiqueta = " ".join(s.texto for s in fila if s.x1 < 200)
+        etiqueta = _etiqueta(fila)
         if any(s.texto.startswith("Monto de Inversión") for s in fila):
             grupo = etiqueta
             grupos[grupo] = []
@@ -259,7 +265,9 @@ def _resumen_inversion(spans: list[Span], lector: "_Lector") -> None:
     for nombre, valores in grupos.items():
         total = t.get(f"resumen:Total {nombre}")
         if total is not None:
-            c.comparar(f"Resumen inversión: suma de {nombre} = Total {nombre}", sum(valores, _CERO), total, _CERO)
+            c.comparar(
+                f"Resumen inversión: suma de {nombre} = Total {nombre}", sum(valores, _CERO), total, _CERO
+            )
     partes = ("Activos Directos", "Activos Bajo Mandato", "Ahorro Previsional")
     if "resumen:Total Activos" in t and all(f"resumen:Total {p}" in t for p in partes):
         c.comparar(
@@ -375,11 +383,10 @@ def _tabla_resumen(spans: list[Span]) -> dict:
     filas = _filas(spans)
     if not filas:
         return {"columnas": [], "filas": []}
-    encabezado = [s for s in filas[0][1:]]
-    columnas = armar_columnas(encabezado)
+    columnas = armar_columnas(filas[0][1:])
     salida = []
     for fila in filas[1:]:
-        etiqueta = " ".join(s.texto for s in fila if s.x1 < 200)
+        etiqueta = _etiqueta(fila)
         valores = {
             columna_de(s, columnas): leer_monto(s.texto) for s in fila if s.x1 >= 200 and _es_numero(s.texto)
         }
@@ -472,6 +479,7 @@ class _Lector:
                 self.columnas = armar_columnas(encabezado)
                 encabezado = []
             if not self.columnas:
+                self._avisar(f"Filas sin encabezado de columnas en el bloque {self.bloque or 'sin título'}")
                 continue
             self._fila(self._celdas(fila, total))
 
@@ -516,28 +524,31 @@ class _Lector:
         elif bloque.startswith("CAJA:"):
             self._movimiento_caja(fila)
         elif bloque:
-            aviso = f"Bloque no reconocido: {bloque}"
-            if aviso not in self.cartola.avisos:
-                self.cartola.avisos.append(aviso)
+            self._avisar(f"Bloque no reconocido: {bloque}")
+
+    def _avisar(self, aviso: str) -> None:
+        if aviso not in self.cartola.avisos:
+            self.cartola.avisos.append(aviso)
 
     def _sumar(self, clave: str, fila: _Fila, etiquetas: list[str]) -> None:
         """Acumula las columnas de montos de un bloque y, en su TOTAL, las compara."""
-        suma = self.sumas.setdefault(clave, {})
+        suma = self.sumas.setdefault(clave, {"filas": _CERO})
         if fila.total:
             for etiqueta in etiquetas:
                 impreso = fila.monto(etiqueta)
                 if impreso is not None:
-                    filas = suma.get("#", _CERO)
+                    # Cada fila arrastra medio peso (o medio centavo de dólar) de redondeo.
+                    unidad = Decimal("0.01") if "(USD)" in etiqueta else Decimal(1)
                     self.cuadraturas.comparar(
                         f"{self.bloque}: suma de filas = TOTAL",
                         suma.get(etiqueta, _CERO),
                         impreso,
-                        max(Decimal(1), _MEDIO * filas),
+                        max(unidad, unidad / 2 * suma["filas"]),
                         etiqueta,
                     )
             del self.sumas[clave]
             return
-        suma["#"] = suma.get("#", _CERO) + 1
+        suma["filas"] += 1
         for etiqueta in etiquetas:
             valor = fila.monto(etiqueta)
             if valor is not None:
@@ -567,7 +578,13 @@ class _Lector:
         que = f"{cuenta} {nombre}"
         tolerancia = Decimal("0.005") if moneda == "USD" else _MEDIO
         if None not in (cuotas, valor_cuota, saldo_moneda):
-            c.comparar(f"FM {moneda}: cuotas × valor cuota = saldo", cuotas * valor_cuota, saldo_moneda, tolerancia, que)
+            c.comparar(
+                f"FM {moneda}: cuotas × valor cuota = saldo",
+                cuotas * valor_cuota,
+                saldo_moneda,
+                tolerancia,
+                que,
+            )
         if None not in (cuotas, promedio, invertido):
             c.comparar(
                 f"FM {moneda}: cuotas × valor promedio de compra = monto invertido",
@@ -584,16 +601,19 @@ class _Lector:
                 Decimal("0.01") if moneda == "USD" else Decimal(1),
                 que,
             )
-        if moneda == "USD" and None not in (saldo_moneda, valor_clp) and self.cartola.tipo_cambio_usd:
+        if moneda == "USD" and None not in (saldo_moneda, valor_clp, self._cambio("USD")):
             c.comparar(
                 "FM USD: saldo en USD × USD de la cabecera = valorización en $",
-                saldo_moneda * self.cartola.tipo_cambio_usd,
+                saldo_moneda * self._cambio("USD"),
                 valor_clp,
                 _MEDIO,
                 que,
             )
         usadas = {"NOMBRE FONDO", "NUMERO CUENTA", "NUMERO CUOTA"}
-        usadas |= {fila.etiqueta(e) for e in ("VALOR CUOTA ACTUAL", "VALOR PROMEDIO COMPRA", saldo, "VALORIZACIÓN EN $")}
+        usadas |= {
+            fila.etiqueta(e)
+            for e in ("VALOR CUOTA ACTUAL", "VALOR PROMEDIO COMPRA", saldo, "VALORIZACIÓN EN $")
+        }
         self._posicion(
             Posicion(
                 cuenta=cuenta,
@@ -644,11 +664,11 @@ class _Lector:
                 _CERO,
                 que,
             )
-        cambio = {"CLP": Decimal(1), "USD": self.cartola.tipo_cambio_usd, "EUR": self.cartola.tipo_cambio_eur}
-        if None not in (total, precio, saldo) and cambio.get(moneda):
+        cambio = self._cambio(moneda)
+        if None not in (total, precio, saldo, cambio):
             c.comparar(
                 "Acciones y CFI: TOTAL × precio de cierre × tipo de cambio = saldo actual",
-                total * precio * cambio[moneda],
+                total * precio * cambio,
                 saldo,
                 _MEDIO,
                 que,
@@ -672,7 +692,14 @@ class _Lector:
         nemotecnico, _, resto = nombre.partition(" - ")
         usadas = {
             fila.etiqueta(e)
-            for e in ("NOMBRE", "NUMERO CUENTA", "TOTAL", "PRECIO CIERRE", "PRECIO PROMEDIO COMPRA", "SALDO ACTUAL")
+            for e in (
+                "NOMBRE",
+                "NUMERO CUENTA",
+                "TOTAL",
+                "PRECIO CIERRE",
+                "PRECIO PROMEDIO COMPRA",
+                "SALDO ACTUAL",
+            )
         }
         self._posicion(
             Posicion(
@@ -691,6 +718,14 @@ class _Lector:
                 otros={k: v for k, v in fila.celdas.items() if k not in usadas},
             )
         )
+
+    def _cambio(self, moneda: str) -> Decimal | None:
+        """Pesos por unidad de la moneda, según la cabecera."""
+        return {
+            "CLP": Decimal(1),
+            "USD": self.cartola.tipo_cambio_usd,
+            "EUR": self.cartola.tipo_cambio_eur,
+        }.get(moneda)
 
     def _posicion(self, posicion: Posicion) -> None:
         if self.previsional is None:
@@ -715,11 +750,11 @@ class _Lector:
         if moneda is None or monto is None:
             self.cartola.avisos.append(f"Saldo de caja no reconocido: {tipo} {cuenta}")
             return
-        cambio = {"CLP": Decimal(1), "USD": self.cartola.tipo_cambio_usd, "EUR": self.cartola.tipo_cambio_eur}
-        if en_pesos is not None and cambio.get(moneda):
+        cambio = self._cambio(moneda)
+        if None not in (en_pesos, cambio):
             self.cuadraturas.comparar(
                 "Caja: saldo en moneda × tipo de cambio = saldo en $",
-                monto * cambio[moneda],
+                monto * cambio,
                 en_pesos,
                 _MEDIO,
                 f"{cuenta} {moneda}",
@@ -891,10 +926,15 @@ class _Lector:
             ("productos:Fondos Mutuos", "Suma de fondos mutuos = Por productos: Fondos Mutuos", 2),
             ("productos:Acciones y CFI", "Suma de acciones y CFI = Por productos: Acciones y CFI", 5),
             ("resumen:Fondos Mutuos", "Fondos mutuos no previsionales = Resumen inversión: Fondos Mutuos", 2),
-            ("resumen:Acciones y CFI", "Acciones y CFI no previsionales = Resumen inversión: Acciones y CFI", 5),
+            (
+                "resumen:Acciones y CFI",
+                "Acciones y CFI no previsionales = Resumen inversión: Acciones y CFI",
+                5,
+            ),
             ("resumen:APV FFMM/DC", "Fondos mutuos previsionales = Resumen inversión: APV FFMM/DC", 2),
         ) + tuple(
-            (f"resumen:{n}", f"Caja no previsional en {m} = Resumen inversión: {n}", 1) for m, n in nombres.items()
+            (f"resumen:{n}", f"Caja no previsional en {m} = Resumen inversión: {n}", 1)
+            for m, n in nombres.items()
         )
         for clave, regla, tolerancia in reglas:
             if clave in t:

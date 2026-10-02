@@ -539,3 +539,26 @@ Uno de los clientes (el de `Document_639264679165525057`) también tiene una car
 **Resultado en las 11 cartolas distintas** (12 PDF con un duplicado exacto, que el programa detecta por el texto y no procesa dos veces): todas las cuadraturas cierran (542 propias más las comunes). Se leen 60 posiciones (33 fondos mutuos, 3 FI BICE, 8 acciones, 5 CFI y 11 depósitos a plazo), 4 saldos de caja, 26 movimientos de caja y 25 de títulos, los mismos conteos que el prototipo de §6.
 
 **Tabla maestra.** Las 13 acciones y CFI se encuentran por nemotécnico. Ninguno de los fondos mutuos BICE de estas cartolas está en el export de ejemplo, que es de portafolios AFI de septiembre, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
+
+---
+
+## 12. Extractor de la parte B (`skill/cartolas/extractores/security.py`)
+
+**Reconocimiento.** Una página es de la cartola Security si trae `VALORES SECURITY S.A. CDB`, o si mide 792 × 612 y sigue a una página marcada. El tamaño solo no basta: Pershing, Sura y Larrainvial también usan carta apaisada. Se reconoce en los 10 PDF de "BICE viejas" que la traen y en ningún otro de `Training Data`.
+
+**Qué se exporta** (juego de archivos `*_SECURITY_<fecha>_V2.csv`):
+
+- Cuentas: el `NUMERO CUENTA` de Security. El grupo sale del título de la página (`NO PREVISIONALES` → CUENTA INVERSION, `PREVISIONALES` → APV PRIME), no de la columna MANDATO. Tipo de APV y régimen quedan vacíos: la cartola no los trae. Portafolio vacío.
+- SALDOS_CAJA: `RESUMEN DE SALDOS EN CAJA`, con el saldo en su moneda y en pesos.
+- SALDOS_FFMM: `FONDOS SECURITY - CLP / USD`; el nombre corto se busca en la tabla maestra como `FM SECURITY <nombre>` y, si no está, por alias (`datos/alias.csv`).
+- CUSTODIA_ACCIONES: `ACCIONES NACIONALES` y `CUOTAS`, por nemotécnico.
+- MOVIMIENTOS_DE_CAJA: `MOVIMIENTOS DE CAJA`. La descripción se lleva al vocabulario del export cuando es inequívoca (`TIPOS_CAJA` en el módulo: dividendos, factura de compra de acciones, cargo para inversión en FM); el resto va en mayúsculas sin el nemotécnico, que pasa a la columna Instrumento.
+- MOVIMIENTOS_FFMM / _BOLSA: `INFORME DE TRANSACCIONES` (`TIPOS_TITULOS`): inversión y rescate de FM a fondos mutuos; compra, venta, canje, disminución de capital y emisión liberada a bolsa. La serie del fondo, que la transacción trunca, se completa desde las posiciones.
+- No se exportan: las filas `Dividendo` del informe de transacciones (ya están como abono de caja), la compra o venta de divisas, y los dividendos de FM reinvertidos en cuotas sin movimiento de caja (pendiente de decidir si van como INVERSION FM).
+- Moneda: en los dividendos de CFI en USD la columna MDA dice CLP; la moneda y el monto se corrigen con el abono de caja de la misma cuenta, documento y nemotécnico. La compra en EUR se corrige a EUR. Ambos casos dejan aviso.
+
+**Cuadraturas propias:** las de §6 parte B, salvo "Caja TOTAL = Caja Total de Por productos", que falla en 2 de 9 por cuentas por cobrar y una diferencia sin explicar en APV; en su lugar se controla el disponible por moneda contra la caja no previsional.
+
+**Resultado en las 9 cartolas distintas:** 310 cuadraturas propias más las comunes, todas cierran. Se leen 180 posiciones (17 fondos mutuos, 161 CFI y 2 acciones; 109 previsionales), 22 saldos de caja, 133 movimientos de caja y 126 de títulos (24 a fondos mutuos, 22 a bolsa y 80 dividendos o divisas que no se exportan). 174 de las 180 posiciones están en la tabla maestra.
+
+**Contra el export de ejemplo** (que es de septiembre, después de la migración a BICE): 157 de las 163 filas de CUSTODIA_ACCIONES tienen el mismo RUT y nemotécnico en el export, con el mismo nombre, producto, moneda y emisor, y 123 tienen además la misma cantidad. Las diferencias de producto base (APV PRIME frente a CUENTA INVERSION en 15 filas) vienen de cuentas que BICE reorganizó al migrarlas.
