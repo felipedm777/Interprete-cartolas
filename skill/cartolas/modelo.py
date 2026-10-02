@@ -11,6 +11,12 @@ class Cuenta:
     portafolio: str
     # Grupo tal como lo muestra la cartola, p. ej. "Cuenta de Inversión" o "APV Prime".
     grupo: str
+    # Producto base, tipo de APV y régimen. Si quedan vacíos se deducen del número
+    # de cuenta BICE (catalogo.tipo_cuenta); las cartolas de otras instituciones
+    # los llenan porque sus números de cuenta no siguen esa regla.
+    producto_base: str = ""
+    tipo_apv: str = ""
+    regimen: str = ""
 
 
 @dataclass
@@ -36,6 +42,8 @@ class Posicion:
     valor_clp: Decimal | None
     valor_usd: Decimal | None
     detalle: list[str] = field(default_factory=list)
+    # Nemotécnico, si la cartola lo trae; se usa para buscar en la tabla maestra.
+    nemotecnico: str = ""
     # Columnas de la cartola que no tienen destino en la salida (rentabilidad, % de activo...).
     otros: dict[str, str] = field(default_factory=dict)
 
@@ -49,6 +57,8 @@ class MovimientoCaja:
     cargo: Decimal
     abono: Decimal
     folio: str = ""
+    # Nemotécnico del instrumento que originó el movimiento (p. ej. un dividendo).
+    instrumento: str = ""
 
 
 @dataclass
@@ -62,6 +72,10 @@ class MovimientoTitulo:
     precio: Decimal
     monto: Decimal
     referencia: str = ""
+    nemotecnico: str = ""
+    # Archivo de destino: "FFMM" o "BOLSA". Vacío: se deduce del tipo
+    # ("... FM" a fondos mutuos, "... RV" a bolsa; el resto no se exporta).
+    destino: str = ""
 
 
 @dataclass
@@ -82,6 +96,12 @@ class Cartola:
     desde: date
     hasta: date
     tipo_cambio_usd: Decimal | None
+    # Institución que emite la cartola; la salida escribe un juego de archivos por institución.
+    institucion: str = "BICE"
+    tipo_cambio_eur: Decimal | None = None
+    # Informe provisorio (Larrainvial): si llega también la definitiva del mismo
+    # cliente y período, se usa la definitiva.
+    provisoria: bool = False
     cuentas: dict[str, Cuenta] = field(default_factory=dict)
     saldos_caja: list[SaldoCaja] = field(default_factory=list)
     posiciones: list[Posicion] = field(default_factory=list)

@@ -37,11 +37,13 @@ class Columna:
     y1: float
 
 
-def leer_spans(pagina: pymupdf.Page) -> list[Span]:
+def leer_spans(pagina: pymupdf.Page, blancos: bool = False) -> list[Span]:
     """Fragmentos de texto de la página en coordenadas visuales.
 
     Aplica la rotación de la página, así que en una página girada 90° las
-    coordenadas quedan como se ve la página. Descarta texto vacío y blanco.
+    coordenadas quedan como se ve la página. Descarta el texto vacío y, salvo
+    con ``blancos``, el texto blanco: en Larrainvial es texto invisible, pero en
+    BICE antigua los títulos de bloque van en blanco sobre una franja de color.
     """
     matriz = pagina.rotation_matrix
     spans = []
@@ -49,7 +51,7 @@ def leer_spans(pagina: pymupdf.Page) -> list[Span]:
         for linea in bloque.get("lines", []):
             for s in linea["spans"]:
                 texto = s["text"].strip()
-                if not texto or s.get("color") == 0xFFFFFF:
+                if not texto or (s.get("color") == 0xFFFFFF and not blancos):
                     continue
                 r = pymupdf.Rect(s["bbox"]) * matriz
                 fuente = s["font"]
@@ -58,6 +60,37 @@ def leer_spans(pagina: pymupdf.Page) -> list[Span]:
                     Span(texto, r.x0, r.y0, r.x1, r.y1, round(s["size"], 1), negrita, fuente)
                 )
     return spans
+
+
+def leer_palabras(pagina: pymupdf.Page, blancos: bool = False) -> list[Span]:
+    """Como leer_spans, pero un Span por palabra.
+
+    Sirve cuando un mismo fragmento junta celdas de columnas distintas, como
+    "02-04-2026 25.839.468" (fecha y folio) en BICE antigua.
+    """
+    matriz = pagina.rotation_matrix
+    palabras = []
+    for bloque in pagina.get_text("rawdict")["blocks"]:
+        for linea in bloque.get("lines", []):
+            for s in linea["spans"]:
+                if s.get("color") == 0xFFFFFF and not blancos:
+                    continue
+                fuente = s["font"]
+                negrita = bool(s["flags"] & 16) or "bold" in fuente.lower() or fuente.endswith("b")
+                actual: list = []
+                for c in s["chars"] + [None]:
+                    if c is None or c["c"].isspace():
+                        if actual:
+                            r = pymupdf.Rect(actual[0]["bbox"]) | pymupdf.Rect(actual[-1]["bbox"])
+                            r = r * matriz
+                            texto = "".join(x["c"] for x in actual)
+                            palabras.append(
+                                Span(texto, r.x0, r.y0, r.x1, r.y1, round(s["size"], 1), negrita, fuente)
+                            )
+                            actual = []
+                    else:
+                        actual.append(c)
+    return palabras
 
 
 def armar_columnas(encabezados: list[Span]) -> list[Columna]:

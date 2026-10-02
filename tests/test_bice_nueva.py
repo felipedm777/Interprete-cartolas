@@ -29,8 +29,12 @@ def cartolas():
 
 def test_reconoce_solo_bice_nueva():
     for pdf in sorted((DATOS / "Training Data").rglob("*.pdf")):
-        esperado = bice_nueva if pdf.parent == CARTOLAS else None
-        assert detectar(pymupdf.open(pdf)) is esperado, pdf.name
+        doc = pymupdf.open(pdf)
+        partes = [(e, paginas) for e, paginas in detectar(doc) if e is bice_nueva]
+        if pdf.parent == CARTOLAS:
+            assert partes == [(bice_nueva, list(range(doc.page_count)))], pdf.name
+        else:
+            assert not partes, pdf.name
 
 
 def test_conteos(cartolas):

@@ -8,7 +8,7 @@ perdido, duplicado o leído mal una fila, así que el archivo queda marcado.
 from collections import defaultdict
 from decimal import Decimal
 
-from .modelo import Cartola, Control
+from .modelo import Cartola, Control, MovimientoTitulo
 
 # Las cartolas imprimen los pesos sin decimales, así que cada sumando puede
 # arrastrar medio peso de redondeo.
@@ -56,11 +56,13 @@ def validar(cartola: Cartola) -> list[Control]:
             )
         )
 
-    # Caja: saldos extraídos por cuenta y total.
+    # Caja: saldos extraídos por cuenta y total, si la cartola imprime el valor
+    # de caja de cada cuenta.
     caja_cuenta: dict[str, Decimal] = defaultdict(Decimal)
     for s in cartola.saldos_caja:
         caja_cuenta[s.cuenta] += s.monto_clp if s.monto_clp is not None else s.monto
-    for numero in {k.removeprefix("caja:") for k in t if k.startswith("caja:")} | set(caja_cuenta):
+    cuentas_con_caja = {k.removeprefix("caja:") for k in t if k.startswith("caja:")}
+    for numero in cuentas_con_caja | (set(caja_cuenta) if cuentas_con_caja else set()):
         controles.append(
             _comparar(
                 f"Saldos de caja extraídos = valor de caja de la cuenta {numero}",
@@ -84,7 +86,8 @@ def validar(cartola: Cartola) -> list[Control]:
     for p in cartola.posiciones:
         clave = f"total:{p.seccion}{' APV' if p.previsional else ''}"
         secciones[clave].append(p.valor_clp or Decimal(0))
-    for clave in {k for k in t if k.startswith("total:")} | set(secciones):
+    impresas = {k for k in t if k.startswith("total:")}
+    for clave in impresas | (set(secciones) if impresas else set()):
         valores = secciones.get(clave, [])
         controles.append(
             _comparar(
@@ -129,28 +132,31 @@ def validar(cartola: Cartola) -> list[Control]:
 
 
 def _controles_por_fila(cartola: Cartola) -> list[Control]:
-    """Cantidad × precio = valor en cada posición y cada movimiento de títulos."""
+    """Cantidad × precio = valor en cada posición y cada movimiento de títulos exportable."""
     controles = []
-    tc = cartola.tipo_cambio_usd
+    cambio = {"USD": cartola.tipo_cambio_usd, "EUR": cartola.tipo_cambio_eur}
     malas = []
     revisadas = 0
     for p in cartola.posiciones:
-        if p.cantidad is None or p.precio_actual is None or p.valor_clp is None:
+        if p.cantidad is None or p.precio_actual is None:
             continue
         calculado = p.cantidad * p.precio_actual
         if p.tabla in ("Notas", "Bonos Internacionales"):
             calculado /= 100  # precio en porcentaje del nominal
         # El precio viene con 4 decimales: se tolera 0,05 % del valor, con un
-        # mínimo de 1 peso o, en USD, de 0,60 dólares.
-        minimo = Decimal(1)
-        if p.moneda == "USD":
-            if not tc:
-                continue
-            calculado *= tc
-            minimo = Decimal("0.6") * tc
+        # mínimo de 1 peso o de 0,60 en moneda extranjera.
+        if p.moneda in cambio and p.valor_clp is not None and cambio[p.moneda]:
+            calculado *= cambio[p.moneda]
+            valor, minimo = p.valor_clp, Decimal("0.6") * cambio[p.moneda]
+        elif p.moneda == "USD" and p.valor_usd is not None:
+            valor, minimo = p.valor_usd, Decimal("0.6")
+        elif p.moneda == "CLP" and p.valor_clp is not None:
+            valor, minimo = p.valor_clp, Decimal(1)
+        else:
+            continue
         revisadas += 1
-        if abs(calculado - p.valor_clp) > max(minimo, abs(p.valor_clp) * Decimal("0.0005")):
-            malas.append(f"{p.cuenta} {p.instrumento}: {calculado:.0f} vs {p.valor_clp}")
+        if abs(calculado - valor) > max(minimo, abs(valor) * Decimal("0.0005")):
+            malas.append(f"{p.cuenta} {p.instrumento}: {calculado:.2f} vs {valor}")
     if revisadas:
         controles.append(
             Control(
@@ -161,7 +167,7 @@ def _controles_por_fila(cartola: Cartola) -> list[Control]:
         )
     malas, revisadas = [], 0
     for m in cartola.movimientos_titulos:
-        if not m.cantidad or not m.precio or not m.monto:
+        if not m.cantidad or not m.precio or not m.monto or not destino(m):
             continue
         revisadas += 1
         calculado = m.cantidad * m.precio
@@ -176,3 +182,14 @@ def _controles_por_fila(cartola: Cartola) -> list[Control]:
             )
         )
     return controles
+
+
+def destino(m: MovimientoTitulo) -> str:
+    """"FFMM", "BOLSA" o "" si el movimiento no va a ningún archivo."""
+    if m.destino:
+        return m.destino
+    if m.tipo.endswith(" FM"):
+        return "FFMM"
+    if m.tipo.endswith(" RV"):
+        return "BOLSA"
+    return ""

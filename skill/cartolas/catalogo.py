@@ -100,6 +100,12 @@ class Catalogo:
             alias,
         )
 
+    def buscar_nemotecnico(self, nemotecnico: str, moneda: str | None = None) -> Instrumento | None:
+        candidatos = [i for i in self.instrumentos if _clave(i.nemotecnico) == _clave(nemotecnico)]
+        if moneda:
+            candidatos = [c for c in candidatos if c.moneda == moneda] or candidatos
+        return candidatos[0] if candidatos else None
+
     def buscar(
         self, nombre: str, moneda: str | None = None, precio: Decimal | None = None
     ) -> Instrumento | None:

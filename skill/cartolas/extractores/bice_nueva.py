@@ -33,18 +33,21 @@ _X_IZQUIERDA = 60
 _TAM_ENCABEZADO = 6.2
 
 
-def reconoce(doc: pymupdf.Document) -> bool:
+def paginas(doc: pymupdf.Document) -> list[int]:
+    """Páginas de esta cartola en el PDF: todas, si la portada es de BICE nueva."""
     if doc.page_count < 3:
-        return False
+        return []
     portada = doc[0].get_text()
-    return (
+    if (
         "BICE" in portada
         and "Información del cliente" in portada
         and _titulo(doc[1]) == "Resumen de tus inversiones"
-    )
+    ):
+        return list(range(doc.page_count))
+    return []
 
 
-def extraer(ruta: str | Path) -> Cartola:
+def extraer(ruta: str | Path, paginas: list[int] | None = None) -> Cartola:
     doc = pymupdf.open(ruta)
     cartola = _portada(doc[0], str(ruta))
     titulo_anterior, bloque_anterior = None, None

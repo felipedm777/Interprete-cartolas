@@ -503,3 +503,39 @@ Uno de los clientes (el de `Document_639264679165525057`) también tiene una car
 3. En los movimientos, ¿`FechaProceso` debe ser la fecha del movimiento o el cierre del período?
 4. ¿Dónde van los Depósitos a Plazo y la "Comisión Gestión Patrimonial", que no tienen CSV destino?
 5. ¿Las filas `Dividendo` del informe de transacciones de Security van a MOVIMIENTOS_BOLSA, o se omiten porque ya aparecen como caja?
+
+---
+
+## 11. Extractor de la parte A (`skill/cartolas/extractores/bice_antigua.py`)
+
+**Reconocimiento.** `paginas(doc)` toma las páginas verticales del principio del PDF que llevan el pie de BICE Inversiones, si la portada trae "Resumen de sus inversiones". Las páginas apaisadas que siguen son de la cartola Security y las lee `security.py`. Cada parte sale como una cartola aparte en el reporte.
+
+**Lectura.** Palabras con coordenadas (`pdf.leer_palabras`), incluido el texto blanco de los títulos de bloque, agrupadas en líneas; los superíndices de 5 pt se descartan. Cada bloque se reconoce por su título exacto (§3) y cada celda se asigna a la columna cuyo encabezado termina más cerca de su borde derecho, porque los números van alineados a la derecha. Si aparece una tabla que el extractor no conoce (renta fija, libreta de ahorro, etc.), queda un aviso en el reporte.
+
+**Qué se exporta:**
+
+| Archivo | Fuente | Notas |
+|---|---|---|
+| Cuentas | `Cuenta Inversión` (0–9 → CUENTA INVERSION); en APV, `Cuenta Fondo` (80–85) | Producto base, tipo de APV y régimen salen de la tabla de cuentas (`catalogo.tipo_cuenta`). `Portafolio` queda vacío: la cartola no lo trae |
+| SALDOS_CAJA | `SALDO FINAL CAJA` de cada bloque de movimientos de caja, por cuenta y moneda | Si una moneda tiene caja pero no movimientos, se asigna a la única cuenta de inversión de la cartola; si hay más de una, queda en el reporte sin exportar |
+| SALDOS_FFMM | `Detalle Cartera Fondos Mutuos en $ / US$ / APV $` | Cantidad = cuotas libres + en garantía; precio = valor cuota; sin precio promedio de compra (la cartola no lo trae). Los `FI BICE …` van con producto FONDOS INVERSIÓN BICE |
+| CUSTODIA_ACCIONES | `Detalle Cartera Renta Variable` | Cantidad = libre + en garantía + a plazo. Nombre largo, emisor y producto de la tabla maestra por nemotécnico |
+| MOVIMIENTOS_DE_CAJA | `Detalle de movimientos de Caja` | Tipo tal como viene (es el vocabulario del export). En dividendos, el instrumento es el nemotécnico y el producto, el del instrumento |
+| MOVIMIENTOS_FFMM / _BOLSA | `Movimientos de Títulos` | `… FM` a fondos mutuos con `N°Ref.` como referencia; `… RV` a bolsa. El instrumento partido en dos líneas se une |
+| No se exporta | Depósitos a plazo, resúmenes, dividendos del período | Los depósitos quedan en el reporte como "sin archivo de destino" |
+
+**Tipo de cambio.** La parte A no lo trae. El programa usa el `USD:` de la cartola Security del mismo PDF y, si el PDF no trae parte Security, el de otra cartola con el mismo cierre; en ambos casos lo anota en el reporte.
+
+**Cuadraturas propias** (además de cantidad × precio en posiciones y movimientos, que hace `validar.py`):
+
+- Portada: suma de activos = Total Activos, y Total Activos + otros − pasivos = Patrimonio, en $, US$ y APV.
+- Resumen por moneda: saldo inicial + compras − ventas + cambio de valor = saldo final en cada fila (salvo depósitos a plazo); suma de instrumentos = fila de su clase; suma de clases = Total Activos; Total Activos = el de la portada.
+- Resumen de cartera: valor inicial y final = los del resumen; inicial + abonos/retiros + ganancia + variación de depósitos a plazo = final.
+- Resumen de movimientos de caja: inicio − compras + ventas + dividendos + abonos = final; compras y ventas = las del resumen; abonos = los del resumen de cartera; final = disponible en caja = suma de los saldos finales del detalle.
+- Detalle de carteras: cada `Subtotal Cuenta Inversión` y `Subtotal Cartera` = suma de sus filas, y el subtotal de la cartera = la clase en el resumen.
+- Movimientos de caja: saldo anterior + abono − cargo = saldo en cada fila, y el último = `SALDO FINAL CAJA`.
+- Dividendos del período = "Dividendos y otros" del resumen de caja.
+
+**Resultado en las 11 cartolas distintas** (12 PDF con un duplicado exacto, que el programa detecta por el texto y no procesa dos veces): todas las cuadraturas cierran (542 propias más las comunes). Se leen 60 posiciones (33 fondos mutuos, 3 FI BICE, 8 acciones, 5 CFI y 11 depósitos a plazo), 4 saldos de caja, 26 movimientos de caja y 25 de títulos, los mismos conteos que el prototipo de §6.
+
+**Tabla maestra.** Las 13 acciones y CFI se encuentran por nemotécnico. Ninguno de los fondos mutuos BICE de estas cartolas está en el export de ejemplo, que es de portafolios AFI de septiembre, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
