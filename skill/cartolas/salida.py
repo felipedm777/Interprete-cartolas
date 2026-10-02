@@ -141,7 +141,7 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
             "PrecioCierreEnMonedaValoracion": p.precio_actual,
             "PrecioPromedioCompra": p.precio_promedio,
         }
-        fila |= _valor_posicion(p, archivo, cuenta, tc, tc_eur)
+        fila |= _valor_posicion(p, archivo, cuenta, tc, tc_eur, cartola.institucion)
         fila |= _cierre(tc, tc_eur)
         salida.agregar(archivo, fila)
 
@@ -151,8 +151,9 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
             continue
         if m.tipo in _MOVIMIENTOS_DOLAR:
             producto, instrumento = "FORWARDS DIVISA", "DOLAR"
-        elif m.instrumento:
-            # Un dividendo o un cobro asociado a un instrumento va con su producto.
+        elif m.instrumento and ("DIVIDENDO" in m.tipo or "DISMINUCION" in m.tipo):
+            # Como en el export, los dividendos van con el instrumento y su producto;
+            # el resto de los movimientos, con la caja.
             datos = catalogo.buscar_nemotecnico(m.instrumento)
             producto = datos.producto if datos else "CUENTAS CAJA"
             instrumento = m.instrumento
@@ -182,7 +183,11 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
         if instrumento:
             producto = instrumento.producto
         else:
-            producto = "FONDOS MUTUOS BICE" if fondo_mutuo else ""
+            nemo = m.nemotecnico or m.instrumento
+            if fondo_mutuo:
+                producto = "FONDOS MUTUOS BICE" if cartola.institucion == "BICE" else "FONDOS MUTUOS"
+            else:
+                producto = "CFI" if nemo.startswith("CFI") else ""
             salida.avisos.append(f"Movimiento {m.tipo} {m.instrumento}: no está en la tabla maestra, va sin emisor")
         fila = _cliente(cartola.rut, cuenta, producto, m.fecha)
         fila |= _datos_instrumento(m.instrumento, m.moneda, instrumento, m.nemotecnico)
@@ -252,7 +257,7 @@ def _patrimonio(
 
 
 def _valor_posicion(
-    p: Posicion, archivo: str, cuenta: Cuenta, tc: Decimal | None, tc_eur: Decimal | None
+    p: Posicion, archivo: str, cuenta: Cuenta, tc: Decimal | None, tc_eur: Decimal | None, institucion: str
 ) -> dict:
     moneda = p.moneda
     if archivo == CUSTODIA_ACCIONES.tipo and moneda == "USD":
@@ -268,9 +273,11 @@ def _valor_posicion(
         valor = p.cantidad * p.precio_actual
         return _patrimonio(moneda, tc, clp=valor, usd=valor)
     if moneda == "USD":
-        # La cartola muestra los USD redondeados a entero; los centavos salen
-        # del equivalente en pesos.
-        if p.valor_clp is not None and tc:
+        # La cartola BICE muestra los USD redondeados a entero; los centavos
+        # salen del equivalente en pesos.
+        if p.valor_usd is not None and institucion != "BICE":
+            usd = p.valor_usd
+        elif p.valor_clp is not None and tc:
             usd = (p.valor_clp / tc).quantize(Decimal("0.01"))
         else:
             usd = p.valor_usd

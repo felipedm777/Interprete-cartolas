@@ -441,3 +441,22 @@ Pasos sugeridos del extractor:
    - Cortar en `Total …` o en `Saldo final`.
 4. Clasificar cada posición en FI (`CFI*`) o FM y mapearla según §5.
 5. Correr las cuadraturas de §6.1 y, si existe el mes anterior del mismo RUT, las de §6.2.
+
+---
+
+## 9. Extractor (`skill/cartolas/extractores/larrainvial.py`)
+
+**Reconocimiento.** Todas las páginas, si el PDF trae `www.larrainvial.com` y el título `INFORME PROVISORIO PATRIMONIAL` o `CARTOLA PATRIMONIAL`. Lo provisorio queda marcado en la cartola: si llegan las dos versiones de un mismo cliente y período, el programa usa la definitiva y deja la provisoria en el reporte.
+
+**Qué se exporta** (juego de archivos `*_LARRAINVIAL_<fecha>_V2.csv`, con la fecha del último cierre):
+
+- Cuenta `0`, CUENTA INVERSION, sin portafolio. Período del 1 al último día del mes de `Periodo:`; tipo de cambio USD y EUR del pie.
+- SALDOS_CAJA: las líneas `Saldo Caja Peso|Dólar` distintas de cero.
+- CUSTODIA_ACCIONES: los nemotécnicos `CFI*` de RENTA FIJA y ALTERNATIVOS. SALDOS_FFMM: el resto (fondos mutuos de Larrainvial), con producto `FONDOS MUTUOS` mientras no se decida otro. En USD, el patrimonio en dólares es cantidad × cotización.
+- MOVIMIENTOS_DE_CAJA: la descripción se lleva al vocabulario del export cuando es inequívoca (`TIPOS_CAJA`: factura de compra RV, dividendo en dólares, venta de dólares, aporte y rescate de fondos mutuos); el resto va en mayúsculas.
+- MOVIMIENTOS_FFMM / _BOLSA (`TIPOS_TITULOS`): aporte y rescate de fondos mutuos; compra RV, ingreso RV y disminución de capital. El informe no trae el monto: se calcula como precio × cantidad, igual que el MontoNeto de COMPRA RV en el export de BICE. Las facturas de caja de las compras son 1,2 % a 1,3 % mayores (comisión, derechos e IVA) y quedan como aviso.
+- Las garantías no son posiciones nuevas: solo se controla que el instrumento esté en cartera.
+
+**Cuadraturas:** las internas de §6.1, más el dígito verificador del RUT, las garantías y que precio × cantidad de los fondos mutuos coincida con la caja de la misma referencia. La de entre meses (§6.2) está en las pruebas.
+
+**Resultado en los 14 informes** (12 provisorios y 2 definitivos): 398 cuadraturas, todas cierran, y el patrimonio final de cada mes es el inicial del siguiente en las 11 transiciones del cliente con meses seguidos. Se leen 53 posiciones (46 CFI y 7 fondos mutuos), 21 saldos de caja, 13 movimientos de caja y 13 de títulos. 30 de las 53 posiciones están en la tabla maestra por nemotécnico; los fondos propios de Larrainvial (`CFILV*`, `FMLV*`, `USLV*`) y `CFIFALCFIA` no, y salen sin emisor.

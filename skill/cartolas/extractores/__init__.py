@@ -14,9 +14,9 @@ expone:
 
 import pymupdf
 
-from . import bice_antigua, bice_nueva, security
+from . import bice_antigua, bice_nueva, larrainvial, security
 
-EXTRACTORES = (bice_nueva, bice_antigua, security)
+EXTRACTORES = (bice_nueva, bice_antigua, security, larrainvial)
 
 
 def detectar(doc: pymupdf.Document) -> list[tuple[object, list[int]]]:

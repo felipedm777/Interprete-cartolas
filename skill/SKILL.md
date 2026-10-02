@@ -5,7 +5,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 
 # Intérprete de cartolas
 
-**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas y la cartola Valores Security que viene pegada a ellas. Larrainvial, Sura y Pershing todavía no tienen extractor y quedan en el reporte como no reconocidos (`docs/inventario.md`).
+**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas, la cartola Valores Security que viene pegada a ellas y los informes Larrainvial. Sura y Pershing todavía no tienen extractor y quedan en el reporte como no reconocidos (`docs/inventario.md`).
 
 ## Cómo usarla
 
@@ -19,6 +19,7 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 - El código sale del nombre de los PDF (`CARTOLA_<código>_...`; si no lo trae, `BICE`) y la fecha de cada juego es el último cierre de sus cartolas, salvo que se indiquen.
 - Un PDF puede traer dos cartolas (BICE antigua + Security): cada una sale en el juego de su institución. Los PDF con el mismo contenido se procesan una sola vez.
 - Si una cartola no trae tipo de cambio (BICE antigua), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
+- Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
 - `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
 
