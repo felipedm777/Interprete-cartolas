@@ -55,11 +55,18 @@ EXT_PDF = {".pdf"}
 EXT_EXCEL = {".xlsx", ".xlsm"}
 EXT_TEXTO = {".csv", ".txt"}
 
+
+def aislado(patron, antes, despues=None):
+    """`patron` sin un carácter de la clase `antes` justo antes ni de `despues`
+    justo después. Equivale a lookarounds negativos, pero se escribe sin ellos
+    para que el script pueda viajar como texto por canales que filtran HTML."""
+    despues = antes if despues is None else despues
+    return r"(?:^|(?<=[^" + antes + r"]))" + patron + r"(?=[^" + despues + r"]|$)"
+
+
 # RUT con puntos (12.345.678-9) o sin puntos (12345678-9), con o sin espacios
 # alrededor del guion. El cuerpo va de 1.000.000 a 99.999.999.
-RUT_RE = re.compile(
-    r"(?<![\d.])(\d{1,2}(?:\.\d{3}){2}|\d{7,8})(\s*-\s*)([\dkK])(?![\dA-Za-z])"
-)
+RUT_RE = re.compile(aislado(r"(\d{1,2}(?:\.\d{3}){2}|\d{7,8})(\s*-\s*)([\dkK])", r"\d.", r"\dA-Za-z"))
 
 # Palabras que acompañan a un RUT o a un nombre y que no son parte del nombre.
 ETIQUETAS = {
@@ -346,6 +353,9 @@ LETRAS_EQUIVALENTES = {
 }
 
 
+LETRA = r"\wÁÉÍÓÚÑáéíóúñ"
+
+
 def patron_token(token):
     partes = []
     for c in token:
@@ -366,10 +376,10 @@ class Reemplazador:
             for seq in c.secuencias():
                 piezas = [patron_token(c.tokens[i]) for i in seq]
                 sep = r"[\s,]+"
-                regex = re.compile(r"(?<![\wÁÉÍÓÚÑáéíóúñ])" + sep.join(piezas) + r"(?![\wÁÉÍÓÚÑáéíóúñ])", re.IGNORECASE)
+                regex = re.compile(aislado(sep.join(piezas), LETRA), re.IGNORECASE)
                 self.patrones.append((regex, c, seq))
             for i in c.apellidos_sueltos():
-                regex = re.compile(r"(?<![\wÁÉÍÓÚÑáéíóúñ])" + patron_token(c.tokens[i]) + r"(?![\wÁÉÍÓÚÑáéíóúñ])", re.IGNORECASE)
+                regex = re.compile(aislado(patron_token(c.tokens[i]), LETRA), re.IGNORECASE)
                 self.patrones.append((regex, c, [i]))
         self.patrones.sort(key=lambda p: len(p[2]), reverse=True)
 
@@ -423,15 +433,15 @@ class Verificador:
         for c in clientes:
             if c.rut:
                 self.rut_res.append(re.compile(
-                    r"(?<!\d)" + str(c.rut) + r"\s*-?\s*" + digito_verificador(c.rut) + r"(?![\dA-Z])"))
+                    aislado(str(c.rut) + r"\s*-?\s*" + digito_verificador(c.rut), r"\d", r"\dA-Z")))
             for seq in c.secuencias():
                 if len(seq) >= 2 or c.es_empresa:
                     self.nombre_res.append(re.compile(
-                        r"(?<![A-Z])" + r"[\s,]+".join(re.escape(c.tokens[i]) for i in seq) + r"(?![A-Z])"))
+                        aislado(r"[\s,]+".join(re.escape(c.tokens[i]) for i in seq), "A-Z")))
             for i in c.apellidos_sueltos():
-                self.nombre_res.append(re.compile(r"(?<![A-Z])" + re.escape(c.tokens[i]) + r"(?![A-Z])"))
+                self.nombre_res.append(re.compile(aislado(re.escape(c.tokens[i]), "A-Z")))
             for i in c.nombres_sueltos():
-                self.suelto_res.append((c.tokens[i], re.compile(r"(?<![A-Z])" + re.escape(c.tokens[i]) + r"(?![A-Z])")))
+                self.suelto_res.append((c.tokens[i], re.compile(aislado(re.escape(c.tokens[i]), "A-Z"))))
 
     def revisar(self, texto):
         """Devuelve (problemas, avisos). Problemas impiden copiar el archivo."""
