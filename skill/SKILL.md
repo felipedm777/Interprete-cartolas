@@ -5,7 +5,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 
 # Intérprete de cartolas
 
-**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas, la cartola Valores Security que viene pegada a ellas y los informes Larrainvial. Sura y Pershing todavía no tienen extractor y quedan en el reporte como no reconocidos (`docs/inventario.md`).
+**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas, la cartola Valores Security que viene pegada a ellas, los informes Larrainvial, las cartolas mensuales Sura y los estados Pershing (`docs/inventario.md`). Sura y Pershing no traen RUT: esas filas salen con `RutCliente` vacío para completarlo después.
 
 ## Cómo usarla
 
@@ -18,7 +18,7 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 - Escribe un juego de 7 archivos por institución: `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING`. Los de BICE se llaman `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv` y los de otras instituciones `<ARCHIVO>_<INSTITUCIÓN>_<AAAAMMDD>_V2.csv` (p. ej. `SALDOS_CAJA_SECURITY_20260430_V2.csv`). Además deja un `REPORTE_<juegos>_<AAAAMMDD>.md`.
 - El código sale del nombre de los PDF (`CARTOLA_<código>_...`; si no lo trae, `BICE`) y la fecha de cada juego es el último cierre de sus cartolas, salvo que se indiquen.
 - Un PDF puede traer dos cartolas (BICE antigua + Security): cada una sale en el juego de su institución. Los PDF con el mismo contenido se procesan una sola vez.
-- Si una cartola no trae tipo de cambio (BICE antigua), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
+- Si una cartola no trae tipo de cambio (BICE antigua, Pershing, Sura sin filas en USD), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
 - Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
 - `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.

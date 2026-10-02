@@ -454,3 +454,20 @@ Tampoco cuadra lo siguiente, pero porque no es comparable: `Cargos` del Resumen 
    - **pdfplumber `extract_tables`:** no hay líneas de tabla. La estrategia "lines" devuelve 1 tabla vacía y la estrategia "text" corta palabras (`Ganan|cia`, `Acciones Ordinar|ias`).
    - **`pdftotext -layout` + regex:** útil para exploración rápida, pero funde bloques lado a lado (el ejecutivo con VALOR INICIAL, las dos columnas de "ENVÍO ELECTRÓNICO") y el espaciado varía.
    - **OCR:** innecesario.
+
+---
+
+## 9. Extractor (`skill/cartolas/extractores/pershing.py`)
+
+**Reconocimiento.** Todas las páginas, si el PDF es de la plantilla Pershing LLC (marca `Pershing LLC`, `Número de Cuenta:` y los títulos de sección). Lee igual los estados con broker BICE y Sura; no reconoce las cartolas Sura ni las BICE antiguas que mencionan "Patrimonio Custodia Pershing". Las secciones se ubican por su título y las columnas por coordenadas; los números van en formato EE.UU. y "No disponible" queda vacío.
+
+**Decisiones por defecto:**
+
+- Juego de archivos `*_PERSHING_<fecha>_V2.csv`. RUT y portafolio vacíos, como decidió Felipe para Pershing; `Cuenta` y `CuentaPershing` = el `Número de Cuenta` impreso, con producto base CUENTA INVERSION.
+- SALDOS_CAJA: el saldo al cierre del money market (sweep) en USD.
+- CUSTODIA_ACCIONES: acciones y ADR con producto `ACCIONES`, ETF con `ETF`; una fila por título sumando sus lotes. Nemotécnico = `Código de Identificación de Títulos`; instrumento = la descripción sin el sufijo `ISIN#`. Valorizado en USD (`Valor de Mercado`; para la acción en libras, su línea en USD). Precio promedio = base de costo / cantidad (vacío si no hay costo).
+- Bonos: se leen y se cuadran, pero no tienen archivo de destino y quedan en el reporte como no exportados.
+- MOVIMIENTOS_PERSHING: una fila por transacción, con el tipo de actividad literal en inglés (`MONEY FUND INCOME`, `SECURITY LIQUIDATED`…), cantidad y precio como vienen (vacíos en ingresos), monto con su signo impreso y producto según la clase del título en Tenencias (`MONEY MARKET`, `BONOS`, `ACCIONES`, `ETF`). No se duplican en MOVIMIENTOS_DE_CAJA: la sección Detalles del Fondo de Money Market solo se usa para cuadrar.
+- Tipo de cambio: el estado no trae USD→CLP; se usa el de otra cartola con el mismo cierre (en la muestra, Larrainvial o Security) y queda anotado en el reporte. La tasa GBP→USD de la Tabla de Tipos de Cambio se usa solo para cuadrar.
+
+**Resultado en los 6 estados:** 203 cuadraturas de §6, todas cierran, y en los 5 MSTAT el valor final de cada mes es el inicial del siguiente y los ingresos del año acumulan mes a mes. Se leen 17 posiciones (9 ETF, 3 acciones —una en libras—, 5 veces el mismo bono sin precio), 6 saldos de money market y 7 transacciones (6 `MONEY FUND INCOME` y 1 `SECURITY LIQUIDATED`), todas con producto y nemotécnico. Ningún título Pershing está en la tabla maestra, así que salen sin emisor.

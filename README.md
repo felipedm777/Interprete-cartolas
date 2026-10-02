@@ -24,7 +24,7 @@ Las cartolas contienen datos reales de clientes, así que:
 
 ## Uso
 
-Por ahora lee las cartolas BICE nuevas (septiembre de 2026 en adelante), las BICE antiguas, la cartola Valores Security que viene pegada a ellas y los informes Larrainvial; Sura y Pershing quedan en el reporte como no reconocidos.
+Lee los 6 formatos de `Training Data`: las cartolas BICE nuevas (septiembre de 2026 en adelante), las BICE antiguas, la cartola Valores Security que viene pegada a ellas, los informes Larrainvial, las cartolas mensuales Sura y los estados Pershing (de BICE y de Sura).
 
 ```
 pip install -r requirements.txt
