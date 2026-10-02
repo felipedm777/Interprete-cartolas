@@ -357,3 +357,24 @@ Tolerancias sugeridas: ±1 CLP por fila y en las identidades del resumen; ±5 CL
 7. Validar con las cuadraturas de §6 antes de escribir los CSV. Si algo falla, marcar el archivo para revisión en vez de exportar.
 
 **Por qué**: el PDF tiene texto nativo con posiciones estables entre las dos variantes, mientras que el orden de texto no es fiable (puntos 2 y 3 de §7). pdfplumber `find_tables()` no sirve: los únicos rectángulos son los fondos de los encabezados, así que devuelve celdas de encabezado fusionadas y una sola columna de datos. La estrategia "text" de pdfplumber tampoco separa bien las filas de 2 líneas. Un prototipo de este enfoque (unas 150 líneas) extrajo todas las filas de los 7 archivos y pasó las 12 cuadraturas dentro de las tolerancias indicadas.
+
+---
+
+## 9. Extractor (`skill/cartolas/extractores/sura.py`)
+
+**Reconocimiento.** Todas las páginas, si la primera trae `Cartola Mensual`, `sura.cl` y `PERÍODO`/`PERIODO` y no es la plantilla Pershing. El estado `Sura pershing-...` lo lee el extractor Pershing.
+
+**Columnas.** Por coordenadas, con bordes fijos entre los datos (no entre los encabezados): así se evitan las fechas invertidas del Resumen (§3.2) y los encabezados corridos de Cuentas de Inversiones (§3.7). Los nombres en dos líneas se pegan a la línea de datos más cercana hacia arriba con 4,5 pt de margen (§7.4).
+
+**Decisiones por defecto** (tablas al comienzo del módulo, fáciles de cambiar):
+
+- RUT vacío, como decidió Felipe; él lo llena después. Portafolio vacío.
+- Cuentas (`CUENTA_FINANCIERA`, `REGIMENES_APV`): Inversiones Financieras van todas a la cuenta `0` (CUENTA INVERSION), sea cual sea su régimen (18Q, 18T, R.GRAL). Inversiones Previsionales van a una cuenta por régimen, con el código del régimen como número y producto base APV PRIME: `CVN_A` → CV / APORTE, `CVN_B` y `CVA_B` → CV / BONIFICACIÓN, `DCA`/`DCN`/`DCR` → DC / BONIFICACIÓN, `BON_F` → DAPVC / APORTE (como las cuentas "BF" de BICE).
+- Posiciones: fondos mutuos a SALDOS_FFMM con producto `FONDOS MUTUOS`; fondos de inversión a CUSTODIA_ACCIONES como `CFI`, incluido el fondo mutuo LarrainVial Enfoque que Sura lista entre los FI (BICE también lo exporta como CFI); acciones a CUSTODIA_ACCIONES con el nombre como nemotécnico. Sura no informa costo, así que `PrecioPromedioCompra` queda vacío. El FI recién comprado sin precio ni saldo sale con patrimonio vacío y un aviso.
+- Movimientos de caja (`TIPOS_CAJA`): `Dividendo en Pesos` → DIVIDENDO EN PESOS, `Factura Compra RV` → FACTURA COMPRA RV, `Abono a Cuenta de Inversiones` → ABONO CUENTA INVERSION $, `Abono a Cta Inv SURA x Rescate` → ABONO ORIGINADO POR PAGO RESCATES $ OWP. `Retiro desde Cta Inversión` y `Abono USDs desde Cuenta` quedan en mayúsculas porque su equivalente no es inequívoco.
+- Movimientos de títulos: fondos mutuos como INVERSION FM (Aportes/Compras) o RESCATE FM (Rescates/Ventas, incluida `Venta por Acciones`); FI y acciones como COMPRA RV o el concepto en mayúsculas (`RESCATE CUSTODIA`, con aviso). En CLP el monto es el `Monto en CLP`; en USD, cantidad × precio en dólares, con el monto en pesos y el tipo de cambio de operación en un aviso. Sin `Monto en CLP` (Aporte por Reparto), cantidad × precio.
+- Tipo de cambio: el `Tipo Cambio Observado` de una fila USD; las cartolas sin filas USD toman el de otra cartola con el mismo cierre.
+
+**Tabla maestra.** Cinco FI de Sura se agregaron a `datos/alias.csv` porque calzan en fondo, serie y moneda y su valor cuota al 31-08 está a menos de 1 % del precio de referencia del export (Ameris Alternativos II A, Singular Leaseback II A, Singular Residential MBS I, Toesca Deuda Privada A y F). No se agregaron los que no cumplen: FYNSA Galgo II y III, Security Pantheon Fully Fund A, Ameris DP con Garantía FOGAPE y LarrainVial Enfoque (sin serie en el nombre), y Ameris Alternativos I y NM Guardian III (moneda distinta). Los fondos mutuos SURA no están en el export de ejemplo y salen sin nemotécnico ni emisor.
+
+**Resultado en las 7 cartolas:** 126 cuadraturas (las 12 de §6 más TOTAL INVERSIONES contra el Resumen y la operación Abono/Cargo contra la columna del monto), todas cierran. Se leen 35 posiciones (17 fondos mutuos, 16 CFI, 2 acciones), 10 saldos de caja, 15 movimientos de caja y 10 de títulos. 7 posiciones están en la tabla maestra (2 acciones por nemotécnico y 5 FI por alias).

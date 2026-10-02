@@ -23,7 +23,8 @@ from .numeros import escribir_numero, leer_monto
 
 RUTA_TABLA = Path(__file__).parent / "datos" / "instrumentos.csv"
 # Instrumentos que la cartola nombra distinto que el export, identificados
-# comparando cantidad y precio promedio de compra del mismo cliente y cuenta.
+# comparando cantidad y precio promedio de compra del mismo cliente y cuenta o,
+# si el cliente no está en el export, nombre, serie, moneda y valor cuota.
 RUTA_ALIAS = Path(__file__).parent / "datos" / "alias.csv"
 
 _COLUMNAS = (
