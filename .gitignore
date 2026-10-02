@@ -1,0 +1,13 @@
+# Datos reales de clientes: nunca al repositorio
+Training Data/
+Example/
+anonimizado/
+clientes.csv
+mapeo_anonimizacion.csv
+reporte_anonimizacion.txt
+claves.txt
+
+__pycache__/
+.pytest_cache/
+.venv/
+venv/

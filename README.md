@@ -20,4 +20,16 @@ Las cartolas contienen datos reales de clientes, así que:
 - `skill/`: la skill (`SKILL.md`) y el paquete Python `cartolas` que lee las cartolas y escribe los archivos de salida.
 - `docs/formato-salida.md`: formato de los archivos de saldos y movimientos, tomado del export de ejemplo.
 - `docs/inventario.md`: formatos de cartola encontrados, cómo extraerlos y validarlos, y preguntas abiertas. El detalle por institución está en `docs/instituciones/`.
-- `tests/`: pruebas (`python3 -m pytest tests`).
+- `tests/`: pruebas (`python3 -m pytest tests`). Las que usan cartolas reales corren solo donde existen sus copias anonimizadas.
+
+## Uso
+
+Por ahora lee las cartolas BICE nuevas (septiembre de 2026 en adelante); los demás formatos quedan en el reporte como no reconocidos.
+
+```
+pip install -r requirements.txt
+cd skill
+python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>"
+```
+
+Deja en la carpeta de salida los 7 CSV y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.

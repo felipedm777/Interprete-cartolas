@@ -321,7 +321,7 @@ En #04, #08 y #13 (los tres revisados también a mano) todas las reglas aplicabl
 
 ## 8. Enfoque recomendado de extracción
 
-**pymupdf `page.get_text("dict")`** (spans con bbox, fuente, tamaño y bold), con reglas geométricas. No conviene pdfplumber `extract_tables` (no hay líneas de tabla: devuelve 0 tablas) ni regex sobre `pdftotext -layout` (colapsa los espacios dobles de los nombres y desordena las celdas de 2 líneas). Un prototipo así (no incluido en el repositorio) extrajo las 185 posiciones, 78 movimientos de caja y 337 de títulos de los 20 archivos sin errores de alineación, y es la base de todas las cuadraturas de §6. Pasos:
+**pymupdf `page.get_text("dict")`** (spans con bbox, fuente, tamaño y bold), con reglas geométricas. No conviene pdfplumber `extract_tables` (no hay líneas de tabla: devuelve 0 tablas) ni regex sobre `pdftotext -layout` (colapsa los espacios dobles de los nombres y desordena las celdas de 2 líneas). Así está implementado el extractor (`skill/cartolas/extractores/bice_nueva.py`, ver §9), que extrae las 185 posiciones, 78 movimientos de caja y 337 de títulos de los 20 archivos sin errores de alineación. Pasos:
 
 1. **Página → sección**: primera línea del texto (título bold 17 pt). Concatenar páginas consecutivas con el mismo título.
 2. **Portada**: etiquetas en x≈480 y valores en x≈634, asignados a la etiqueta más cercana por arriba. Período y TC con regex (`al (\d\d/\d\d/\d{4})`, `([\d.,]+) \(CLP/USD\)`).
@@ -340,3 +340,37 @@ Preguntas abiertas para Felipe:
 - ¿Se suman Acc. en Gtía y Saldo a Plazo a Cantidad?
 - ¿Qué PrecioTIR se espera en INGRESO RV?
 - ¿Se confirma la convención A = APORTE / B = BONIFICACIÓN?
+
+## 9. Extractor implementado
+
+```
+cd skill
+python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>" [--solo-afi]
+```
+
+Escribe los 7 CSV con el nombre `<ARCHIVO>_<código>_<cierre>_V2.csv` (el código se toma del nombre de los PDF, `CARTOLA_<código>_...`) y un `REPORTE_<código>_<cierre>.md` con las cuadraturas que no cierran, los avisos y lo que no se exportó. El reporte trae RUT y nombres de archivo, así que no va al repositorio.
+
+### Resultado sobre las 20 cartolas anonimizadas
+
+| Verificación | Resultado |
+|---|---|
+| Cuadraturas internas (sumas por cuenta, grupo, sección y total; caja; cantidad × precio en posiciones y movimientos) | 260 controles, todos cierran. Tolerancia: medio peso por sumando |
+| Montos impresos en las páginas de detalle y movimientos que no quedaron en ninguna fila | Ninguno (solo la etiqueta "Previsional (APV)" de los bloques) |
+| Posiciones exportadas que también están en el export de ejemplo | 170 de 182 |
+| De esas 170, mismo portafolio, producto base, producto, nemotécnico, moneda, emisor, moneda de valoración, tipo de APV y régimen | 170 |
+| Misma cantidad | 168. Las 2 restantes cambiaron entre el 22-09 y el 30-09 (una por una compra del 24-09 que aparece en los movimientos); en ambas el valor exportado es el impreso en la cartola |
+| Mismo precio promedio de compra | 163. En las 7 restantes el valor exportado es el impreso en la cartola; 4 difieren en 0,0001 o 0,0002 |
+
+De las 12 posiciones sin par en el ejemplo, 8 son de portafolios que no son de AFI Trading (el ejemplo no los trae) y 4 se compraron el 24 y 25-09, después del export, según los movimientos. 10 de ellas son fondos que no están en la tabla maestra, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
+
+### Decisiones mientras Felipe responde las preguntas
+
+- **Portafolios.** Se exportan todos; `--solo-afi` deja solo los que dicen AFITRADING, como el ejemplo.
+- **Cuenta Pershing dentro de la cartola.** No se exporta (su caja, bonos y notas): no tiene número de cuenta BICE y el ejemplo no trae saldos Pershing. Queda en el reporte.
+- **Sin archivo de destino.** Intermediación Financiera, Bonos Internacionales y Notas quedan en el reporte.
+- **FechaProceso.** Saldos: fecha de cierre de la cartola. Movimientos: fecha del movimiento.
+- **Valorización.** Como en el ejemplo: `SALDOS_FFMM` con cuotas × valor cuota; `CUSTODIA_ACCIONES` con el valor de mercado impreso, en USD en la cuenta de inversión y en pesos en las cuentas APV. Los USD de caja recuperan los centavos desde el equivalente en pesos.
+- **Movimientos de caja.** `CARGO EN DOLARES` y `OPERACION DOLAR` van con instrumento `DOLAR` y producto `FORWARDS DIVISA`; el resto, con `CAJA CLP` o `CAJA USD`. Los dividendos no dicen de qué instrumento son, así que van como caja (el ejemplo usa el nemotécnico).
+- **Montos en USD de los movimientos.** La cartola los imprime sin decimales y no trae el equivalente en pesos, así que salen enteros.
+- **`TipoCambioEUR`** vacío y **`EnTransito`** = `NO`: la cartola no los trae.
+- **Nombre del instrumento.** Se exporta el de la tabla maestra (el del export). `datos/alias.csv` resuelve los que la cartola nombra distinto, como el caso HOLLYPORT de §7.
