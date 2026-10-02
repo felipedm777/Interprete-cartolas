@@ -167,7 +167,9 @@ def _controles_por_fila(cartola: Cartola) -> list[Control]:
         )
     malas, revisadas = [], 0
     for m in cartola.movimientos_titulos:
-        if not m.cantidad or not m.precio or not m.monto or not destino(m):
+        # En Pershing el monto incluye comisiones y el precio de los bonos es un
+        # porcentaje del nominal: lo cuadra su propio extractor.
+        if not m.cantidad or not m.precio or not m.monto or destino(m) not in ("FFMM", "BOLSA"):
             continue
         revisadas += 1
         calculado = m.cantidad * m.precio
@@ -185,7 +187,7 @@ def _controles_por_fila(cartola: Cartola) -> list[Control]:
 
 
 def destino(m: MovimientoTitulo) -> str:
-    """"FFMM", "BOLSA" o "" si el movimiento no va a ningún archivo."""
+    """"FFMM", "BOLSA", "PERSHING" o "" si el movimiento no va a ningún archivo."""
     if m.destino:
         return m.destino
     if m.tipo.endswith(" FM"):

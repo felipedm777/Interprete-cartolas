@@ -68,14 +68,18 @@ class MovimientoTitulo:
     tipo: str
     instrumento: str
     moneda: str
-    cantidad: Decimal
-    precio: Decimal
-    monto: Decimal
+    # Vacíos en movimientos sin cantidad o precio (p. ej. un dividendo Pershing).
+    cantidad: Decimal | None
+    precio: Decimal | None
+    monto: Decimal | None
     referencia: str = ""
     nemotecnico: str = ""
-    # Archivo de destino: "FFMM" o "BOLSA". Vacío: se deduce del tipo
+    # Archivo de destino: "FFMM", "BOLSA" o "PERSHING". Vacío: se deduce del tipo
     # ("... FM" a fondos mutuos, "... RV" a bolsa; el resto no se exporta).
     destino: str = ""
+    # Producto para instrumentos que no están en la tabla maestra, si la cartola
+    # lo deja claro (p. ej. la clase del título en las tenencias Pershing).
+    producto: str = ""
 
 
 @dataclass

@@ -4,6 +4,8 @@ from datetime import date
 from decimal import Decimal as D
 
 from cartolas.catalogo import Catalogo, Instrumento
+from cartolas.exportar import escribir
+from cartolas.formato import MOVIMIENTOS_PERSHING
 from cartolas.modelo import Cartola, Cuenta, MovimientoCaja, MovimientoTitulo, Posicion, SaldoCaja
 from cartolas.salida import generar
 from cartolas.validar import validar
@@ -147,3 +149,35 @@ def test_movimientos():
     assert (fm["NumeroRerferencia"], fm["NemotecnicoInstrumento"], fm["MontoNeto"]) == ("123", "FM-X", D("200"))
     (rv,) = s.filas["MOVIMIENTOS_BOLSA"]
     assert (rv["NombreTipoMovimiento"], rv["Producto"], rv["Cuenta"]) == ("COMPRA RV", "CFI", "90")
+
+
+def _cartola_pershing() -> Cartola:
+    c = Cartola("Pershing", "x.pdf", "", "", date(2026, 1, 1), date(2026, 1, 31), TC, institucion="PERSHING")
+    c.cuentas = {"EXT1": Cuenta("EXT1", "", "Pershing", producto_base="CUENTA INVERSION")}
+    c.posiciones = [
+        _posicion("EXT1", "Acciones", "ACCION GBP", "GBP", "10", "2", "0", seccion="Acciones"),
+    ]
+    c.posiciones[0].valor_clp, c.posiciones[0].valor_usd = None, D("25")
+    c.movimientos_titulos = [
+        MovimientoTitulo(date(2026, 1, 9), "EXT1", "MONEY FUND INCOME", "FONDO MM", "USD", None, None, D("1.5"),
+                         nemotecnico="MM1", destino="PERSHING", producto="MONEY MARKET"),
+        MovimientoTitulo(date(2026, 1, 10), "EXT1", "BOUGHT", "ACCION W", "USD", D("3"), D("10"), D("-30.5"),
+                         destino="PERSHING", producto="ACCIONES"),
+    ]
+    return c
+
+
+def test_pershing(tmp_path):
+    c = _cartola_pershing()
+    assert all(x.ok for x in validar(c))  # la compra con comisión no entra al control genérico
+    s = generar(c, CATALOGO)
+    (accion,) = s.filas["CUSTODIA_ACCIONES"]
+    assert (accion["MonedaValoracionPatrimonio"], accion["patrimonioUSD"], accion["patrimonioCLP"]) == (
+        "USD", D("25"), D("25000"))
+    ingreso, compra = s.filas["MOVIMIENTOS_PERSHING"]
+    assert (ingreso["Cuenta"], ingreso["CuentaPershing"], ingreso["RutCliente"]) == ("EXT1", "EXT1", "")
+    assert (ingreso["Producto"], ingreso["Cantidad"], ingreso["MontoNeto"]) == ("MONEY MARKET", None, D("1.5"))
+    assert (compra["NombreTipoMovimiento"], compra["MontoNeto"], compra["FechaProceso"]) == ("BOUGHT", D("-30.5"), "2026-01-10")
+    assert "TipoAPV" not in compra
+    escribir(MOVIMIENTOS_PERSHING, s.filas["MOVIMIENTOS_PERSHING"], tmp_path / "m.csv")
+    assert (tmp_path / "m.csv").read_text(encoding="utf-8").splitlines()[2].startswith("3,0000;2026-01-10;;EXT1;EXT1;")

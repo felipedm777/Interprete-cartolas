@@ -24,10 +24,11 @@ from .formato import (
     MOVIMIENTOS_BOLSA,
     MOVIMIENTOS_DE_CAJA,
     MOVIMIENTOS_FFMM,
+    MOVIMIENTOS_PERSHING,
     SALDOS_CAJA,
     SALDOS_FFMM,
 )
-from .modelo import Cartola, Cuenta, Posicion
+from .modelo import Cartola, Cuenta, MovimientoTitulo, Posicion
 from .validar import destino
 
 # Archivo y producto según la tabla de la cartola, para instrumentos que no están
@@ -184,11 +185,16 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
             producto = instrumento.producto
         else:
             nemo = m.nemotecnico or m.instrumento
-            if fondo_mutuo:
+            if m.producto:
+                producto = m.producto
+            elif fondo_mutuo:
                 producto = "FONDOS MUTUOS BICE" if cartola.institucion == "BICE" else "FONDOS MUTUOS"
             else:
                 producto = "CFI" if nemo.startswith("CFI") else ""
             salida.avisos.append(f"Movimiento {m.tipo} {m.instrumento}: no está en la tabla maestra, va sin emisor")
+        if archivo == "PERSHING":
+            salida.agregar(MOVIMIENTOS_PERSHING.tipo, _fila_pershing(cartola, cuenta, producto, m, instrumento))
+            continue
         fila = _cliente(cartola.rut, cuenta, producto, m.fecha)
         fila |= _datos_instrumento(m.instrumento, m.moneda, instrumento, m.nemotecnico)
         fila |= {
@@ -204,6 +210,26 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
         else:
             salida.agregar(MOVIMIENTOS_BOLSA.tipo, fila)
     return salida
+
+
+def _fila_pershing(
+    cartola: Cartola, cuenta: Cuenta, producto: str, m: MovimientoTitulo, instrumento: Instrumento | None
+) -> dict:
+    """MOVIMIENTOS_PERSHING no lleva tipo de APV ni régimen; la cuenta de la
+    cartola Pershing va en Cuenta y en CuentaPershing."""
+    fila = _cliente(cartola.rut, cuenta, producto, m.fecha)
+    del fila["TipoAPV"], fila["DescripcionTipoRegimenTributario"]
+    fila |= _datos_instrumento(m.instrumento, m.moneda, instrumento, m.nemotecnico)
+    fila |= {
+        "CuentaPershing": cuenta.numero,
+        "NumeroRerferencia": m.referencia,
+        "NombreTipoMovimiento": m.tipo,
+        "Moneda": m.moneda,
+        "Cantidad": m.cantidad,
+        "PrecioTIR": m.precio,
+        "MontoNeto": m.monto,
+    }
+    return fila
 
 
 def _instrumento(
@@ -267,6 +293,9 @@ def _valor_posicion(
         clp = p.valor_clp
         if clp is None and moneda == "EUR" and tc_eur and p.cantidad is not None and p.precio_actual is not None:
             clp = p.cantidad * p.precio_actual * tc_eur
+        if clp is None and p.valor_usd is not None:
+            # Pershing valoriza en USD lo que está en otras monedas (libras).
+            return _patrimonio("USD", tc, usd=p.valor_usd)
         return _patrimonio("CLP", tc, clp=clp)
     if archivo == SALDOS_FFMM.tipo and p.cantidad is not None and p.precio_actual is not None:
         # Como en el export: patrimonio = cuotas × valor cuota, sin redondear.
