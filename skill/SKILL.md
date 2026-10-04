@@ -25,6 +25,8 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 
 Después de correrla, revisar el reporte: cada cartola con una cuadratura que no cierra debe mirarse contra el PDF antes de usar sus filas.
 
+Si hay un export de BICE del mismo día, `python -m cartolas.comparar <carpeta del export> <carpeta de salida>` compara fila por fila los clientes de la salida y deja `COMPARACION_<código>.md` con las columnas que difieren y las filas que están en uno solo.
+
 ## Cómo funciona
 
 1. `extractores.detectar` identifica por el contenido, no por el nombre del archivo, qué cartolas trae el PDF y en qué páginas.

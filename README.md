@@ -33,3 +33,11 @@ python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>"
 ```
 
 Deja en la carpeta de salida un juego de 7 CSV por institución y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.
+
+Para comparar la salida con un export de BICE del mismo día, fila por fila:
+
+```
+python -m cartolas.comparar "<carpeta del export>" "<carpeta de salida>"
+```
+
+Compara solo los clientes que están en la salida y, en los movimientos, solo la fecha del export. Si el export no es del día de cierre de las cartolas, `--fecha-saldos AAAA-MM-DD` indica qué saldos de la salida comparar. Deja `COMPARACION_<código>.md` en la carpeta de salida.
