@@ -51,8 +51,47 @@ python -m cartolas.eventos_capital <respuesta.json>... [--desde 2025-08-01]
 ```
 
 El comando no pisa lo que ya había: agrega los eventos nuevos y descarta los
-repetidos. `resumen_dividendos` dice, en una llamada, qué fondos tiene
-DataFondos y hasta cuándo, y sirve para saber a qué fondos pedirles el detalle.
+repetidos. `--desde` deja fuera los eventos de las respuestas pagados antes de
+esa fecha; los que la tabla ya tenía se mantienen.
+
+## La cobertura
+
+`skill/cartolas/datos/datafondos_cobertura.csv` guarda lo que devuelve
+`resumen_dividendos`: cada fondo y serie que sigue DataFondos, cuántos repartos
+tiene publicados, la fecha del último y cuándo los actualizó.
+
+```
+Nemotecnico;RutFondo;Serie;Nombre;Eventos;UltimaFecha;Actualizado
+CFIAMG3R-E;9879;R;AMERIS NM P CREDIT;51;2026-10-07;2026-10-07
+```
+
+Se actualiza con el mismo comando: reconoce sola una respuesta de
+`resumen_dividendos` y la guarda en la cobertura en vez de la tabla. Con ella la
+skill sabe, para cada fondo de la cuenta de un abono dudoso, si:
+
+- DataFondos no lo sigue: consultarlo no sirve.
+- DataFondos lo sigue y tiene repartos más nuevos que la tabla, o los actualizó
+  antes del abono: **falta consultarlo** con `dividendos`.
+- DataFondos lo sigue, la tabla está al día y no hay reparto en la fecha.
+
+Sin cobertura, todo fondo que no está en la tabla queda por consultar, como en
+la primera versión. La que trae la skill es del 08-10-2026, con 134 fondos y
+series.
+
+## Las causas de un abono dudoso
+
+Cada dudoso queda como caja, con una causa en el reporte y el detalle de qué se
+sabe de cada instrumento de la cuenta:
+
+| Causa | Cuándo |
+|---|---|
+| Falta consultar fondos en DataFondos | Algún fondo de la cuenta está por consultar. El reporte lista esos fondos con su RUT y el nemotécnico como lo escribe DataFondos, que es lo que pide `dividendos` |
+| Lo explican varios fondos | Más de un fondo de la cuenta tiene un reparto que da el monto |
+| Ningún reparto publicado cuadra con el monto | Algún fondo de la cuenta tiene un reparto en la fecha, pero ninguno da el monto |
+| DataFondos no tiene un reparto que lo pague | Los instrumentos de la cuenta son acciones, fondos que DataFondos no sigue o fondos sin reparto en la fecha |
+
+El paso a paso para resolver los que faltan consultar, con el MCP de DataFondos,
+está en `skill/SKILL.md`, "Eventos de capital con DataFondos".
 
 La tabla del repositorio se armó el 08-10-2026 con los 56 fondos que aparecen en
 las cartolas anonimizadas, desde agosto de 2025: 289 eventos (234 dividendos, 48
@@ -96,14 +135,23 @@ Los nemotécnicos se comparan sin guiones: un mismo fondo y serie se escribe
 `CFI-AMG3RE` o `CFIAMG3R-E`, el export de BICE usa los dos y DataFondos a veces
 publica solo uno.
 
+## Agregar una institución nueva
+
+El emparejamiento no depende del formato: usa las posiciones de cada cuenta,
+con su cantidad, y los movimientos de caja, con fecha, cuenta, tipo, moneda y
+monto. Para una institución nueva basta con que su extractor los entregue así y
+con agregar a `TIPOS_CAJA` los nombres que da a sus abonos por dividendos o
+repartos (y a `TIPOS_TITULOS` los movimientos de títulos que imprime con el
+monto por cuota, si los trae).
+
 ## Lo que no alcanza a cubrir
 
-- **Dividendos de acciones.** DataFondos publica los repartos de los fondos; los
-  `PAGO DE DIVIDENDOS` de acciones chilenas y los dividendos de ETF extranjeros
-  de las cuentas Pershing quedan dudosos. Solo se consultan los nemotécnicos que
-  empiezan con `CFI` o `CFM`, que son los de fondos.
-- **Fondos que DataFondos no sigue.** Quedan listados en el reporte, con el mes,
-  para pedirlos y ampliar la tabla.
+- **Dividendos de acciones.** DataFondos publica los repartos de los fondos y
+  sigue solo 11 acciones, sin el monto por acción: los dividendos de acciones
+  quedan dudosos. Solo se consultan los nemotécnicos que empiezan con `CFI` o
+  `CFM`, que son los de fondos.
+- **Fondos que DataFondos no sigue.** Quedan dudosos y el detalle los nombra; no
+  se piden porque DataFondos no los tiene.
 - **Dividendos reinvertidos.** No pasan por la caja, así que no hay abono que
   explicar; siguen apareciendo como aporte al fondo.
 
@@ -133,9 +181,16 @@ confirmar con lo que publica:
 | 4 | Los fondos de la cuenta que podrían pagarlos no están en DataFondos (`CFI-CARSGE`, que es el que dice el export, `CFISDA5F-E`, `CFIBCIRFCL`, `CFIVNTFIIV`) o están sin repartos ese mes (`CFIBTGPLAA`, `CFILCEUP-E`) |
 | 2 | Dividendos en dólares del mismo día en dos cuentas, que no cuadran con ningún reparto publicado de los fondos de la cuenta. El único fondo de esas cuentas sin repartos en la tabla es `CFI-ANM7AE`, que DataFondos sigue sin ningún reparto publicado |
 
+Con la cobertura, la skill llega sola a esa misma revisión: los 10 quedan con la
+causa "DataFondos no tiene un reparto que lo pague", ninguno por consultar, y el
+detalle de cada uno nombra las acciones, los fondos que DataFondos no sigue y
+los que no tienen reparto en la fecha.
+
 Con las 59 cartolas de `Training Data` (los 6 formatos): 102 abonos confirmados
 y 5 identificados, 5 dudosos y ninguna contradicción. Los 5 identificados son 2
 de BICE nueva —que con solo 20 cartolas del mes no se pueden deducir comparando
 clientes— y 3 de Sura, que no traen instrumento y antes salían como caja. Los 5
-dudosos son de Sura: 3 de una cuenta con acciones y 2 de fondos que DataFondos
-sigue pero sin un reparto que cuadre en la fecha.
+dudosos son de Sura: 3 de una cuenta con acciones y un fondo con un reparto en
+la fecha que no da el monto ("Ningún reparto publicado cuadra con el monto") y 2
+de fondos que DataFondos sigue sin un reparto en la fecha ("DataFondos no tiene
+un reparto que lo pague").

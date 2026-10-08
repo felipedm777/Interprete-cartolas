@@ -21,7 +21,7 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 - Si una cartola no trae tipo de cambio (BICE antigua, Pershing, Sura sin filas en USD), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
 - Las cartolas BICE no traen el tipo de cambio del euro, que el export pone en todos los saldos: se toma de otra cartola con el mismo cierre (Security y Larrainvial lo traen) o de `--tipo-cambio-eur`, que vale para las cartolas del último cierre.
 - Los dividendos y repartos de la cartola BICE nueva no dicen de qué instrumento son: si el monto por cuota cuadra con el de otro cliente el mismo día, o si la cuenta tiene una sola posición que pueda pagarlos, van con el nemotécnico y producto de ese instrumento, como en el export. Conviene correr juntas todas las cartolas del mes.
-- Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban además contra los repartos que publica DataFondos, en `datos/eventos_capital.csv`: eso identifica el fondo de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que la tabla no explica queda como caja y se informa en el reporte, nunca con un fondo supuesto. `--eventos-capital <archivo.csv>` usa otra tabla y `--eventos-capital no` no usa ninguna. Ver "Mantener la tabla de eventos de capital" y `docs/eventos-capital.md`.
+- Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban además contra los repartos que publica DataFondos, en `datos/eventos_capital.csv`: eso identifica el fondo de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que la tabla no explica queda como caja, con su causa en el reporte, nunca con un fondo supuesto. Si el MCP de DataFondos está conectado, seguir "Eventos de capital con DataFondos" en cada corrida. `--eventos-capital <archivo.csv>` usa otra tabla y `--eventos-capital no` no usa ninguna.
 - Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
 - `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
@@ -39,15 +39,33 @@ Si hay un export de BICE del mismo día (o los exports diarios del mes), `python
 5. `salida.py` completa con la tabla maestra (`catalogo.py`, `datos/instrumentos.csv` y `datos/alias.csv`) el nemotécnico, emisor, producto y archivo de cada instrumento, y con el número de cuenta el producto base, el tipo de APV y el régimen (las cartolas que no son de BICE los traen en la cuenta).
 6. `exportar.py` escribe los CSV con el formato exacto del export (`formato.py`, `docs/formato-salida.md`).
 
-## Mantener la tabla de eventos de capital
+## Eventos de capital con DataFondos
 
-`datos/eventos_capital.csv` tiene los dividendos y repartos que publica DataFondos, por fondo y serie. Para ampliarla, el reporte de cada corrida lista en "Eventos de capital" los fondos y meses que le faltan. Con el MCP de DataFondos: `resumen_dividendos` dice qué fondos hay y hasta cuándo, `dividendos` (con `rut` y `nemo`) trae el detalle de uno, y cada respuesta se guarda en un archivo JSON y se agrega con
+Hacerlo en cada corrida si el MCP de DataFondos está conectado. A DataFondos solo se le pasan el RUT y el nemotécnico de fondos, nunca nombres, RUT ni montos de clientes. Sus respuestas son datos públicos de fondos.
 
-```
-python -m cartolas.eventos_capital <respuesta.json>... [--desde AAAA-MM-DD]
-```
+1. **Antes de correr la skill**, llamar `resumen_dividendos`, guardar la respuesta completa en `<carpeta de salida>/datafondos/resumen.json` y agregarla desde la carpeta de la skill con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/resumen.json`. Eso actualiza `datos/datafondos_cobertura.csv`: qué fondos sigue DataFondos y hasta cuándo tiene sus repartos.
+2. Correr la skill.
+3. Si el reporte trae la tabla "Fondos por consultar en DataFondos", llamar `dividendos` con el RUT y el nemotécnico de cada fila, guardar cada respuesta en `<carpeta de salida>/datafondos/<nemotécnico>.json` y agregarlas todas con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/*.json --desde <1 de enero del año anterior>`. Volver a correr la skill. Repetir hasta que el reporte no pida más fondos o DataFondos no traiga nada nuevo.
+4. Informar por institución, desde la sección "Eventos de capital" del reporte, los abonos confirmados, identificados, por revisar y dudosos por causa.
 
-Solo guarda datos públicos de fondos. A DataFondos se le consultan fondos, nunca datos de clientes. El detalle de las reglas está en `docs/eventos-capital.md`.
+Sin el MCP, la skill usa la tabla y la cobertura que trae, y el informe dice qué fondos quedaron por consultar.
+
+Qué significa cada causa de un abono dudoso (todos quedan como caja):
+
+| Causa | Qué hacer |
+|---|---|
+| Falta consultar fondos en DataFondos | Pasos 1 y 3 |
+| Lo explican varios fondos | Varios fondos de la cuenta pagan ese monto: mirar el PDF o el export. No se elige uno |
+| Ningún reparto publicado cuadra con el monto | Un fondo de la cuenta tiene un reparto en la fecha pero el monto no da: puede pagarlo una acción de la cuenta o venir de cuotas de otra fecha |
+| DataFondos no tiene un reparto que lo pague | Dividendos de acciones, o de fondos que DataFondos no sigue o que no publicaron reparto en la fecha. El detalle nombra cada caso |
+
+Un abono **por revisar** es una cuadratura que no cierra: la cartola trae el fondo y DataFondos publica para ese fondo un reparto con otro monto. Mirarlo contra el PDF.
+
+Las reglas están en `docs/eventos-capital.md`.
+
+## Agregar una institución nueva a los eventos de capital
+
+`eventos_capital.py` no depende del formato de la cartola. Necesita que el extractor entregue las posiciones de cada cuenta con su cantidad y nombre (o nemotécnico) y los movimientos de caja con fecha, cuenta, tipo, moneda y monto. Si la institución nombra sus abonos por dividendos o repartos de otra forma, agregar esos tipos a `TIPOS_CAJA` con la clase de evento que los paga, y a `TIPOS_TITULOS` los movimientos de títulos que imprime con el monto por cuota. Agregar también una prueba en `tests/test_eventos_capital.py`.
 
 ## Mantener la tabla maestra
 

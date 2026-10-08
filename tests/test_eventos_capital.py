@@ -92,7 +92,8 @@ def test_lo_que_la_tabla_no_explica_queda_dudoso_y_sin_instrumento():
     c = _cartola([("ACCION", 100)], [("PAGO DE DIVIDENDOS", 3000, CIERRE, "")])
     resultado = ec.conciliar([c], CATALOGO, TABLA)
     assert c.movimientos_caja[0].instrumento == ""
-    assert len(resultado.dudosos) == 1 and "está en la tabla" in resultado.dudosos[0]
+    assert len(resultado.dudosos) == 1 and "acciones u otros instrumentos" in resultado.dudosos[0]
+    assert resultado.causas == {ec.SIN_REPARTO: 1}
     # DataFondos publica los repartos de los fondos: una acción no se le consulta.
     assert resultado.pendientes == set()
 
@@ -225,3 +226,81 @@ def test_agrega_a_la_tabla_lo_que_devuelve_datafondos(tmp_path):
     # Volver a agregar la misma respuesta no repite el evento.
     assert ec.main([str(respuesta), "--tabla", str(tabla)]) == 0
     assert len(ec.Tabla.cargar(tabla)) == 2
+    # --desde filtra lo que llega, no lo que la tabla ya tenía.
+    assert ec.main([str(respuesta), "--tabla", str(tabla), "--desde", "2026-01-01"]) == 0
+    assert len(ec.Tabla.cargar(tabla)) == 2
+
+
+# Qué fondos sigue DataFondos, actualizada después de los abonos de las pruebas.
+COBERTURA = ec.Cobertura(
+    [
+        ec.Seguido("CFI-A", "1", eventos=2, ultima_fecha=date(2026, 9, 29), actualizado=date(2026, 10, 7)),
+        ec.Seguido("CFI-B", "2", eventos=2, ultima_fecha=date(2026, 9, 29), actualizado=date(2026, 10, 7)),
+    ]
+)
+
+
+def test_con_la_cobertura_un_fondo_que_datafondos_no_sigue_no_queda_por_consultar():
+    c = _cartola([("FONDO A", 100)], [("DIVIDENDO EN PESOS", 250, CIERRE, "")])
+    sin_a = ec.Tabla([e for e in TABLA.eventos if e.nemotecnico != "CFI-A"])
+    resultado = ec.conciliar([c], CATALOGO, sin_a, ec.Cobertura(COBERTURA.seguidos[1:]))
+    assert resultado.pendientes == set()
+    assert resultado.causas == {ec.SIN_REPARTO: 1}
+    assert "fondos que DataFondos no sigue: CFI-A" in resultado.dudosos[0]
+
+
+def test_un_fondo_con_repartos_mas_nuevos_que_la_tabla_queda_por_consultar():
+    c = _cartola([("FONDO A", 100)], [("DIVIDENDO EN PESOS", 250, CIERRE, "")])
+    sin_a = ec.Tabla([e for e in TABLA.eventos if e.nemotecnico != "CFI-A"])
+    resultado = ec.conciliar([c], CATALOGO, sin_a, COBERTURA)
+    assert resultado.pendientes == {("CFI-A", "2026-09")}
+    assert resultado.causas == {ec.POR_CONSULTAR: 1}
+
+
+def test_una_cobertura_anterior_al_abono_deja_el_fondo_por_consultar():
+    c = _cartola([("FONDO B", 30)], [("DIVIDENDO EN PESOS", 120, date(2026, 11, 27), "")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    assert resultado.pendientes == {("CFI-B", "2026-11")}
+    assert resultado.causas == {ec.POR_CONSULTAR: 1}
+
+
+def test_un_fondo_al_dia_sin_reparto_en_la_fecha_no_queda_por_consultar():
+    c = _cartola([("FONDO B", 30)], [("DIVIDENDO EN PESOS", 120, date(2026, 8, 10), "")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    assert resultado.pendientes == set()
+    assert "fondos sin reparto publicado en la fecha: CFI-B" in resultado.dudosos[0]
+
+
+def test_ningun_reparto_publicado_cuadra():
+    c = _cartola([("FONDO B", 30), ("ACCION", 10)], [("DIVIDENDO EN PESOS", 999, CIERRE, "")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    assert resultado.causas == {ec.NO_CUADRA: 1}
+
+
+def test_agrega_la_cobertura_que_devuelve_resumen_dividendos(tmp_path):
+    respuesta = tmp_path / "resumen.json"
+    fila = {"rut": "9461", "serie": "A", "nombre": "FONDO", "ultima_actualizacion": "2026-10-07T18:15:04"}
+    respuesta.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "data": [
+                    {**fila, "nemo": "CFI-AMG2AE", "total": 0, "ultima_fecha": None},
+                    {**fila, "nemo": "CFIAMG2A-E", "total": 45, "ultima_fecha": "2026-06-22"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    tabla, cobertura = tmp_path / "eventos.csv", tmp_path / "cobertura.csv"
+    assert ec.main([str(respuesta), "--tabla", str(tabla), "--cobertura", str(cobertura)]) == 0
+    assert not tabla.exists()
+    leida = ec.Cobertura.cargar(cobertura)
+    assert len(leida) == 2
+    # El mismo fondo con las dos grafías: vale la que tiene los repartos.
+    seguido = leida.buscar("CFI-AMG2AE")
+    assert (seguido.nemotecnico, seguido.eventos, seguido.actualizado) == (
+        "CFIAMG2A-E",
+        45,
+        date(2026, 10, 7),
+    )

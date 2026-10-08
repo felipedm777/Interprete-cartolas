@@ -13,14 +13,18 @@ tiene en ese fondo da el monto abonado: eso identifica el fondo y distingue un
 dividendo de un reparto o una disminución de capital. Lo que la tabla no
 explica queda marcado como dudoso en el reporte, nunca completado a mano.
 
-La tabla se consulta en DataFondos (`dividendos` por fondo, o
-`resumen_dividendos` para saber qué fondos tiene) y se guarda en
-`datos/eventos_capital.csv`. Para agregarle lo que devuelve la herramienta,
-guardar cada respuesta en un archivo JSON y correr:
+La tabla se consulta en DataFondos (`dividendos` por fondo) y se guarda en
+`datos/eventos_capital.csv`. Junto a ella, `datos/datafondos_cobertura.csv`
+guarda lo que devuelve `resumen_dividendos`: qué fondos sigue DataFondos, hasta
+qué fecha tiene sus repartos y cuándo los actualizó. Con eso cada abono dudoso
+queda con su causa (falta consultar un fondo, lo explican varios fondos, ningún
+reparto publicado cuadra, o DataFondos no tiene un reparto que lo pague) y el
+reporte dice qué fondos consultar. Para agregar las respuestas, guardar cada
+una en un archivo JSON y correr:
 
     python -m cartolas.eventos_capital <respuesta.json>...
 
-La tabla solo tiene datos públicos de fondos: nunca datos de clientes.
+Las dos tablas solo tienen datos públicos de fondos: nunca datos de clientes.
 """
 
 import argparse
@@ -28,6 +32,7 @@ import csv
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -38,6 +43,7 @@ from .modelo import Cartola, Control, MovimientoCaja, MovimientoTitulo
 from .numeros import leer_monto
 
 RUTA_TABLA = Path(__file__).parent / "datos" / "eventos_capital.csv"
+RUTA_COBERTURA = Path(__file__).parent / "datos" / "datafondos_cobertura.csv"
 
 _COLUMNAS = (
     "RutFondo",
@@ -50,6 +56,32 @@ _COLUMNAS = (
     "Anulado",
     "Evento",
 )
+
+_COLUMNAS_COBERTURA = (
+    "Nemotecnico",
+    "RutFondo",
+    "Serie",
+    "Nombre",
+    "Eventos",
+    "UltimaFecha",
+    "Actualizado",
+)
+
+# Causas de un abono dudoso, de la que se resuelve consultando DataFondos a la
+# que DataFondos no puede resolver.
+POR_CONSULTAR = "Falta consultar fondos en DataFondos"
+VARIOS = "Lo explican varios fondos"
+NO_CUADRA = "Ningún reparto publicado cuadra con el monto"
+SIN_REPARTO = "DataFondos no tiene un reparto que lo pague"
+CAUSAS = (POR_CONSULTAR, VARIOS, NO_CUADRA, SIN_REPARTO)
+
+# Qué sabe DataFondos de un instrumento de la cuenta en la fecha de un abono.
+_PUBLICADO = "con reparto publicado que no cuadra"
+_CONSULTAR = "por consultar en DataFondos"
+_NO_SIGUE = "fondos que DataFondos no sigue"
+_SIN_EVENTO = "fondos sin reparto publicado en la fecha"
+_OTRO = "acciones u otros instrumentos, cuyos dividendos DataFondos no publica"
+_ESTADOS = (_PUBLICADO, _CONSULTAR, _NO_SIGUE, _SIN_EVENTO, _OTRO)
 
 # Clases de evento, normalizadas desde el texto que publica DataFondos.
 DIVIDENDO = "DIVIDENDO"
@@ -130,6 +162,8 @@ class Conciliacion:
     revisar: list[str] = field(default_factory=list)
     # Fondos y fechas que faltan en la tabla, para ampliarla desde DataFondos.
     pendientes: set[tuple[str, str]] = field(default_factory=set)
+    # Abonos dudosos por causa (CAUSAS).
+    causas: Counter = field(default_factory=Counter)
 
     def extender(self, otra: "Conciliacion") -> None:
         self.confirmados += otra.confirmados
@@ -137,6 +171,7 @@ class Conciliacion:
         self.dudosos += otra.dudosos
         self.revisar += otra.revisar
         self.pendientes |= otra.pendientes
+        self.causas += otra.causas
 
 
 def clase_de(texto: str) -> str:
@@ -242,8 +277,72 @@ class Tabla:
             and (not moneda or not e.moneda or e.moneda == moneda)
         ]
 
-    def cubre(self, nemotecnico: str) -> bool:
-        return _nemo_clave(nemotecnico) in self._por_nemo
+    def ultimo_pago(self, nemotecnico: str) -> date | None:
+        """Fecha de pago del último evento de ese fondo en la tabla."""
+        fechas = [e.fecha_pago for e in self._por_nemo.get(_nemo_clave(nemotecnico), []) if e.fecha_pago]
+        return max(fechas) if fechas else None
+
+
+@dataclass(frozen=True)
+class Seguido:
+    """Un fondo y serie que DataFondos sigue, según `resumen_dividendos`."""
+
+    nemotecnico: str  # como lo escribe DataFondos, para pedirle `dividendos`
+    rut_fondo: str
+    serie: str = ""
+    nombre: str = ""
+    # Repartos que tiene publicados y fecha del último.
+    eventos: int = 0
+    ultima_fecha: date | None = None
+    # Cuándo DataFondos actualizó los repartos de este fondo.
+    actualizado: date | None = None
+
+
+class Cobertura:
+    """Qué fondos sigue DataFondos y hasta cuándo tiene sus repartos."""
+
+    def __init__(self, seguidos: list[Seguido]):
+        self.seguidos = seguidos
+        # DataFondos puede listar el mismo fondo con las dos grafías y los
+        # repartos solo en una (CFI-AMG2AE sin eventos, CFIAMG2A-E con 45): vale
+        # la que tiene más.
+        self._por_nemo: dict[str, Seguido] = {}
+        for x in sorted(seguidos, key=lambda x: (x.eventos, x.ultima_fecha or date.min)):
+            self._por_nemo[_nemo_clave(x.nemotecnico)] = x
+
+    def __len__(self) -> int:
+        return len(self.seguidos)
+
+    def buscar(self, nemotecnico: str) -> Seguido | None:
+        return self._por_nemo.get(_nemo_clave(nemotecnico))
+
+    def actualizada(self) -> date | None:
+        fechas = [s.actualizado for s in self.seguidos if s.actualizado]
+        return max(fechas) if fechas else None
+
+    @classmethod
+    def cargar(cls, ruta: Path = RUTA_COBERTURA) -> "Cobertura":
+        if not ruta.exists():
+            return cls([])
+        with open(ruta, encoding="utf-8", newline="") as f:
+            filas = list(csv.DictReader(f, delimiter=";"))
+        faltan = [c for c in _COLUMNAS_COBERTURA if filas and c not in filas[0]]
+        if faltan:
+            raise ValueError(f"{ruta}: faltan las columnas {', '.join(faltan)}")
+        return cls(
+            [
+                Seguido(
+                    nemotecnico=r["Nemotecnico"],
+                    rut_fondo=r["RutFondo"],
+                    serie=r["Serie"],
+                    nombre=r["Nombre"],
+                    eventos=int(r["Eventos"] or 0),
+                    ultima_fecha=_fecha(r["UltimaFecha"]),
+                    actualizado=_fecha(r["Actualizado"]),
+                )
+                for r in filas
+            ]
+        )
 
 
 def _nemo_clave(nemotecnico: str) -> str:
@@ -284,17 +383,26 @@ def _mismo_por_cuota(impreso: Decimal, publicado: Decimal) -> bool:
     return abs(impreso - publicado.quantize(unidad)) <= unidad / 2
 
 
-def conciliar(cartolas: list[Cartola], catalogo: Catalogo, tabla: Tabla) -> Conciliacion:
+def conciliar(
+    cartolas: list[Cartola],
+    catalogo: Catalogo,
+    tabla: Tabla,
+    cobertura: Cobertura | None = None,
+) -> Conciliacion:
     """Identifica y comprueba con la tabla los abonos por eventos de capital.
 
     Completa el instrumento de los abonos que no lo traen cuando un solo fondo
     de la cuenta explica el monto, y deja en la conciliación los que no se
-    pudieron explicar. No cambia un instrumento que la cartola ya trae: si no
-    coincide con lo que publica DataFondos, lo anota para revisar.
+    pudieron explicar, con su causa. No cambia un instrumento que la cartola ya
+    trae: si no coincide con lo que publica DataFondos, lo anota para revisar.
+    Con la cobertura de DataFondos distingue un fondo que falta consultar de uno
+    que DataFondos no sigue o que no publicó un reparto en la fecha; sin ella,
+    todo fondo que no está en la tabla queda por consultar.
     """
+    cobertura = cobertura or Cobertura([])
     total = Conciliacion()
     for cartola in cartolas:
-        parte = _conciliar_cartola(cartola, catalogo, tabla)
+        parte = _conciliar_cartola(cartola, catalogo, tabla, cobertura)
         total.extender(parte)
         if parte.asignados:
             cartola.avisos.append(
@@ -311,11 +419,13 @@ def conciliar(cartolas: list[Cartola], catalogo: Catalogo, tabla: Tabla) -> Conc
         for texto in parte.revisar:
             cartola.controles.append(Control("Evento de capital contra DataFondos", False, texto))
         for texto in parte.dudosos:
-            cartola.avisos.append(f"Dudoso (DataFondos no lo explica): {texto}")
+            cartola.avisos.append(f"Abono dudoso: {texto}")
     return total
 
 
-def _conciliar_cartola(cartola: Cartola, catalogo: Catalogo, tabla: Tabla) -> Conciliacion:
+def _conciliar_cartola(
+    cartola: Cartola, catalogo: Catalogo, tabla: Tabla, cobertura: Cobertura
+) -> Conciliacion:
     resultado = Conciliacion()
     if not len(tabla):
         return resultado
@@ -354,30 +464,73 @@ def _conciliar_cartola(cartola: Cartola, catalogo: Catalogo, tabla: Tabla) -> Co
                     f"que DataFondos publica para ese fondo"
                     + (f" y sí con {otros}" if otros else "")
                 )
-            elif _parece_fondo(m.instrumento):
-                # La tabla no tiene el reparto que pagó este abono.
+            elif (
+                _parece_fondo(m.instrumento)
+                and _estado(m.instrumento, clase, m.fecha, moneda, tabla, cobertura) == _CONSULTAR
+            ):
+                # La tabla no tiene el reparto que pagó este abono y DataFondos
+                # puede tenerlo.
                 resultado.pendientes.add((m.instrumento, f"{m.fecha:%Y-%m}"))
             continue
         candidatos = sorted({n for n, _ in explican})
         if len(candidatos) == 1:
             m.instrumento = candidatos[0]
             resultado.asignados += 1
-        elif candidatos:
-            resultado.dudosos.append(f"{donde}: lo explican {', '.join(candidatos)}")
+            continue
+        if candidatos:
+            causa, detalle = VARIOS, f"lo explican {', '.join(candidatos)}"
         else:
-            cubiertos = [n for n in posiciones if tabla.cubre(n)]
-            resultado.dudosos.append(
-                f"{donde}: ninguno de los fondos de la cuenta que están en la tabla lo explica"
-                if cubiertos
-                else f"{donde}: ningún instrumento de la cuenta está en la tabla (DataFondos "
-                f"publica los repartos de los fondos, no los dividendos de acciones)"
-            )
-            resultado.pendientes |= {
-                (n, f"{m.fecha:%Y-%m}")
-                for n in posiciones
-                if not tabla.cubre(n) and _parece_fondo(n)
+            estados = {
+                n: _estado(n, clase, m.fecha, moneda, tabla, cobertura) for n in sorted(posiciones)
             }
+            causa = (
+                POR_CONSULTAR
+                if _CONSULTAR in estados.values()
+                else NO_CUADRA
+                if _PUBLICADO in estados.values()
+                else SIN_REPARTO
+            )
+            grupos = [
+                f"{estado}: {', '.join(n for n, e in estados.items() if e == estado)}"
+                for estado in _ESTADOS
+                if estado in estados.values()
+            ]
+            detalle = "; ".join(grupos) if grupos else "la cuenta no tiene posiciones"
+            resultado.pendientes |= {
+                (n, f"{m.fecha:%Y-%m}") for n, e in estados.items() if e == _CONSULTAR
+            }
+        resultado.causas[causa] += 1
+        resultado.dudosos.append(f"{donde}. {causa} ({detalle})")
     return resultado
+
+
+def _estado(
+    nemotecnico: str, clase: str, fecha: date, moneda: str, tabla: Tabla, cobertura: Cobertura
+) -> str:
+    """Qué sabe DataFondos de lo que ese instrumento pudo pagar en la fecha."""
+    if not _parece_fondo(nemotecnico):
+        return _OTRO
+    if tabla.buscar(nemotecnico, clase, fecha, moneda):
+        return _PUBLICADO
+    if not len(cobertura):
+        # Sin saber qué fondos sigue DataFondos, todo fondo que falta se consulta.
+        return _CONSULTAR
+    seguido = cobertura.buscar(nemotecnico)
+    if seguido is None:
+        return _NO_SIGUE
+    if seguido.actualizado is None or seguido.actualizado < fecha:
+        # La cobertura es anterior al abono: DataFondos puede haber publicado
+        # el reparto después.
+        return _CONSULTAR
+    ultimo = tabla.ultimo_pago(nemotecnico)
+    if (
+        seguido.ultima_fecha
+        and seguido.ultima_fecha >= fecha - timedelta(days=_DIAS_DESPUES)
+        and (ultimo is None or seguido.ultima_fecha > ultimo)
+    ):
+        # DataFondos tiene repartos de ese fondo más nuevos que la tabla.
+        return _CONSULTAR
+    return _SIN_EVENTO
 
 
 def _explica_titulo(
@@ -437,11 +590,60 @@ def _cuotas_por_cuenta(cartola: Cartola, catalogo: Catalogo) -> dict[str, dict[s
 # --- Mantener la tabla desde las respuestas de DataFondos ---------------------
 
 
+def _filas(datos: object) -> list[dict]:
+    filas = datos.get("data", []) if isinstance(datos, dict) else datos
+    if not isinstance(filas, list) or not all(isinstance(r, dict) for r in filas):
+        raise ValueError("la respuesta no trae una lista de filas en 'data'")
+    return filas
+
+
+def _es_resumen(filas: list[dict]) -> bool:
+    """Si las filas son de `resumen_dividendos` (un fondo por fila) y no de
+    `dividendos` (un evento por fila)."""
+    return bool(filas) and all("evento" not in r and "total" in r for r in filas)
+
+
+def _cobertura_json(datos: object) -> list[Seguido]:
+    """Fondos de una respuesta de la herramienta `resumen_dividendos`."""
+    return [
+        Seguido(
+            nemotecnico=str(r.get("nemo") or ""),
+            rut_fondo=str(r.get("rut") or ""),
+            serie=str(r.get("serie") or ""),
+            nombre=str(r.get("nombre") or ""),
+            eventos=int(r.get("total") or 0),
+            ultima_fecha=_fecha(str(r.get("ultima_fecha") or "")),
+            actualizado=_fecha(
+                str(r.get("ultima_actualizacion_exitosa") or r.get("ultima_actualizacion") or "")[:10]
+            ),
+        )
+        for r in _filas(datos)
+        if r.get("nemo")
+    ]
+
+
+def escribir_cobertura(seguidos: list[Seguido], ruta: Path) -> None:
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    with open(ruta, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(_COLUMNAS_COBERTURA), delimiter=";", lineterminator="\n")
+        w.writeheader()
+        for x in sorted(seguidos, key=lambda x: (x.nombre, x.serie, x.nemotecnico)):
+            w.writerow(
+                {
+                    "Nemotecnico": x.nemotecnico,
+                    "RutFondo": x.rut_fondo,
+                    "Serie": x.serie,
+                    "Nombre": x.nombre,
+                    "Eventos": x.eventos,
+                    "UltimaFecha": x.ultima_fecha.isoformat() if x.ultima_fecha else "",
+                    "Actualizado": x.actualizado.isoformat() if x.actualizado else "",
+                }
+            )
+
+
 def _desde_json(datos: object) -> list[Evento]:
     """Eventos de una respuesta de la herramienta `dividendos` de DataFondos."""
-    filas = datos.get("data", []) if isinstance(datos, dict) else datos
-    if not isinstance(filas, list):
-        raise ValueError("la respuesta no trae una lista de eventos en 'data'")
+    filas = _filas(datos)
     eventos = []
     for r in filas:
         texto = str(r.get("evento") or "")
@@ -498,14 +700,17 @@ def _clave(e: Evento) -> tuple:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m cartolas.eventos_capital",
-        description="Agrega a la tabla de eventos de capital las respuestas de la herramienta "
-        "`dividendos` de DataFondos, guardadas como archivos JSON.",
+        description="Agrega las respuestas de DataFondos, guardadas como archivos JSON: las de "
+        "`dividendos` van a la tabla de eventos de capital y las de `resumen_dividendos`, a la "
+        "cobertura (qué fondos sigue DataFondos y hasta cuándo).",
     )
     parser.add_argument("respuestas", nargs="+", help="archivos JSON con la respuesta de DataFondos")
     parser.add_argument("--tabla", default=str(RUTA_TABLA), help="tabla a actualizar")
+    parser.add_argument("--cobertura", default=str(RUTA_COBERTURA), help="cobertura a actualizar")
     parser.add_argument(
         "--desde",
-        help="descartar los eventos pagados antes de esta fecha, AAAA-MM-DD",
+        help="no agregar de las respuestas los eventos pagados antes de esta fecha, AAAA-MM-DD "
+        "(los que ya tenía la tabla se mantienen)",
     )
     parser.add_argument(
         "--reemplazar",
@@ -518,17 +723,42 @@ def main(argv: list[str] | None = None) -> int:
     desde = date.fromisoformat(args.desde) if args.desde else None
     tenia = [] if args.reemplazar else Tabla.cargar(ruta).eventos
     nuevos: list[Evento] = []
+    seguidos: list[Seguido] = []
+    con_eventos = 0
     for nombre in args.respuestas:
         try:
             with open(nombre, encoding="utf-8") as f:
-                nuevos += _desde_json(json.load(f))
+                datos = json.load(f)
+            if _es_resumen(_filas(datos)):
+                seguidos += _cobertura_json(datos)
+            else:
+                nuevos += _desde_json(datos)
+                con_eventos += 1
         except (OSError, ValueError, json.JSONDecodeError) as e:
             parser.error(f"{nombre}: {e}")
 
+    if seguidos:
+        ruta_cobertura = Path(args.cobertura)
+        # Cada resumen trae todos los fondos que sigue DataFondos: el más nuevo
+        # de cada fondo reemplaza al que había.
+        por_nemo = {x.nemotecnico.upper(): x for x in Cobertura.cargar(ruta_cobertura).seguidos}
+        por_nemo.update({x.nemotecnico.upper(): x for x in seguidos})
+        cobertura = Cobertura(list(por_nemo.values()))
+        escribir_cobertura(cobertura.seguidos, ruta_cobertura)
+        print(
+            f"Cobertura: {len(cobertura)} fondos en {ruta_cobertura}, actualizada al "
+            f"{cobertura.actualizada()}"
+        )
+    if not con_eventos:
+        return 0
+
+    leidos = len(nuevos)
+    if desde:
+        nuevos = [e for e in nuevos if e.fecha_pago and e.fecha_pago >= desde]
     eventos: list[Evento] = []
     vistos = set()
     for e in tenia + nuevos:
-        if not e.nemotecnico or (desde and (e.fecha_pago is None or e.fecha_pago < desde)):
+        if not e.nemotecnico:
             continue
         if _clave(e) in vistos:
             continue
@@ -540,7 +770,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(eventos)} eventos en {ruta}"
         + (f", pagos del {periodo[0]} al {periodo[1]}" if periodo else "")
     )
-    print(f"{len(nuevos)} leídos de {len(args.respuestas)} respuestas; {len(eventos) - len(tenia)} nuevos.")
+    print(f"{leidos} leídos de {con_eventos} respuestas; {len(eventos) - len(tenia)} nuevos.")
     return 0
 
 
