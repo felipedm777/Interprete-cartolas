@@ -62,7 +62,9 @@ def test_salida_coincide_con_el_export_de_ejemplo(tmp_path):
         "Portafolio", "ProductoBase", "Producto", "NemotecnicoInstrumento", "MonedaInstrumento",
         "Emisor", "MonedaValoracionPatrimonio", "TipoAPV", "DescripcionTipoRegimenTributario",
     ]  # fmt: skip
-    for tipo, pares_minimos in (("SALDOS_FFMM", 36), ("CUSTODIA_ACCIONES", 134)):
+    # El export del 22-09 nombraba "ETF SINGULAR GLOBAL EQUITIES" a tres fondos de
+    # inversión que el del 30-09 (y la tabla maestra) nombran bien; uno queda sin par.
+    for tipo, pares_minimos in (("SALDOS_FFMM", 36), ("CUSTODIA_ACCIONES", 133)):
         nuestras = _leer(next(tmp_path.glob(f"{tipo}_10038_20260930_V2.csv")))
         ejemplo = defaultdict(list)
         for r in _leer(next(EJEMPLO.glob(f"{tipo}_*.csv"))):

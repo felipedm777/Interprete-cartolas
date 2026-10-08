@@ -363,14 +363,31 @@ Escribe los 7 CSV con el nombre `<ARCHIVO>_<código>_<cierre>_V2.csv` (el códig
 
 De las 12 posiciones sin par en el ejemplo, 8 son de portafolios que no son de AFI Trading (el ejemplo no los trae) y 4 se compraron el 24 y 25-09, después del export, según los movimientos. 10 de ellas son fondos que no están en la tabla maestra, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
 
+### Resultado contra el export diario al 30-09 (480 cartolas del SFTP)
+
+Cartolas de septiembre de todos los clientes, corridas juntas con `--solo-afi --tipo-cambio-eur 1102,72109` y comparadas con `python -m cartolas.comparar` contra los saldos del 30-09 y los movimientos diarios del 11-09 al 30-09. Las 480 cartolas cierran todas sus cuadraturas.
+
+| Archivo | Filas del export con par | Diferencias que quedan | Sin par |
+|---|---|---|---|
+| SALDOS_CAJA | 744 de 747 | Ninguna | 3 del export: caja en dólares bajo US$ 0,50, que la cartola no imprime |
+| SALDOS_FFMM | 766 de 766 | 6 de redondeo (un fondo APV que el export redondea a pesos) | Ninguna |
+| CUSTODIA_ACCIONES | 4052 de 4052 | 11 de redondeo, de medio peso o menos | Ninguna |
+| MOVIMIENTOS_DE_CAJA | 1726 de 1770 | Centavos de dólar (la cartola imprime enteros); 3 dividendos sin instrumento deducible | 44 del export: abonos y cargos de dividendos de AGF que la cartola no imprime. 36 de la salida: abonos de saldos traídos desde Security el 14-09, que el export no trae |
+| MOVIMIENTOS_BOLSA | 9441 de 9795 | Emisor en 123 (el export de movimientos nombra distinto algunos emisores que el de saldos); centavos de dólar | 354 del export: lotes idénticos que la cartola junta en una fila y tres fondos que el export del 14-09 nombra distinto. 238 de la salida: cuentas sin movimientos del 14-09 en el export |
+| MOVIMIENTOS_FFMM | 157 de 158 | 3 de centavos de dólar | 1 del export, 2 de la salida |
+
+Lo que no tiene par o difiere viene de lo que la cartola no imprime o de inconsistencias del propio export; no quedan errores de lectura conocidos.
+
 ### Decisiones mientras Felipe responde las preguntas
 
 - **Portafolios.** Se exportan todos; `--solo-afi` deja solo los que dicen AFITRADING, como el ejemplo.
 - **Cuenta Pershing dentro de la cartola.** No se exporta (su caja, bonos y notas): no tiene número de cuenta BICE y el ejemplo no trae saldos Pershing. Queda en el reporte.
-- **Sin archivo de destino.** Intermediación Financiera, Bonos Internacionales y Notas quedan en el reporte.
+- **Sin archivo de destino.** Intermediación Financiera, Bonos, Bonos Internacionales y Notas quedan en el reporte (el export lleva los bonos a `CUSTODIA_RENTA_FIJA`, que la skill no escribe). Sus movimientos `INGRESO RF` sí van a `MOVIMIENTOS_BOLSA`, como en el export, igual que `VENTA CF`.
 - **FechaProceso.** Saldos: fecha de cierre de la cartola. Movimientos: fecha del movimiento.
-- **Valorización.** Como en el ejemplo: `SALDOS_FFMM` con cuotas × valor cuota; `CUSTODIA_ACCIONES` con el valor de mercado impreso, en USD en la cuenta de inversión y en pesos en las cuentas APV. Los USD de caja recuperan los centavos desde el equivalente en pesos.
-- **Movimientos de caja.** `CARGO EN DOLARES` y `OPERACION DOLAR` van con instrumento `DOLAR` y producto `FORWARDS DIVISA`; el resto, con `CAJA CLP` o `CAJA USD`. Los dividendos no dicen de qué instrumento son, así que van como caja (el ejemplo usa el nemotécnico).
+- **Valorización.** Como en el ejemplo: `SALDOS_FFMM` con cuotas × valor cuota truncado a 4 decimales; `CUSTODIA_ACCIONES` con el valor de mercado impreso, en USD en la cuenta de inversión y en pesos en las cuentas APV. Los USD de caja recuperan los centavos desde el equivalente en pesos.
+- **Movimientos de caja.** `CARGO EN DOLARES` y `OPERACION DOLAR` van con instrumento `DOLAR` y producto `FORWARDS DIVISA`; el resto, con `CAJA CLP` o `CAJA USD`. Los dividendos y repartos no dicen de qué instrumento son; el export usa el nemotécnico, así que se deduce juntando las cartolas: un instrumento paga el mismo monto por cuota a todos sus aportantes el mismo día (`dividendos.py`). Si no hay cómo saberlo, van como caja.
 - **Montos en USD de los movimientos.** La cartola los imprime sin decimales y no trae el equivalente en pesos, así que salen enteros.
-- **`TipoCambioEUR`** vacío y **`EnTransito`** = `NO`: la cartola no los trae.
+- **`TipoCambioEUR`**: la cartola no lo trae; se toma de otra cartola con el mismo cierre o de `--tipo-cambio-eur`, y si no, queda vacío.
+- **Caja en tránsito.** La tabla "Cuentas por Cobrar" de la página de caja y "Cuentas por Pagar" de los pasivos van a `SALDOS_CAJA` con `EnTransito` = `SI` (la segunda con monto negativo), como en el export.
+- **Caja en dólares bajo US$ 0,50.** La cartola no la muestra y el export sí; la cuenta queda sumando unos pesos menos que su patrimonio y el reporte lo avisa.
 - **Nombre del instrumento.** Se exporta el de la tabla maestra (el del export). `datos/alias.csv` resuelve los que la cartola nombra distinto, como el caso HOLLYPORT de §7.

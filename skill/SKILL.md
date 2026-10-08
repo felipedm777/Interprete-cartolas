@@ -12,13 +12,15 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 Desde la carpeta `skill/`:
 
 ```
-python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD]
+python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109]
 ```
 
 - Escribe un juego de 7 archivos por institución: `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING`. Los de BICE se llaman `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv` y los de otras instituciones `<ARCHIVO>_<INSTITUCIÓN>_<AAAAMMDD>_V2.csv` (p. ej. `SALDOS_CAJA_SECURITY_20260430_V2.csv`). Además deja un `REPORTE_<juegos>_<AAAAMMDD>.md`.
 - El código sale del nombre de los PDF (`CARTOLA_<código>_...`; si no lo trae, `BICE`) y la fecha de cada juego es el último cierre de sus cartolas, salvo que se indiquen.
 - Un PDF puede traer dos cartolas (BICE antigua + Security): cada una sale en el juego de su institución. Los PDF con el mismo contenido se procesan una sola vez.
 - Si una cartola no trae tipo de cambio (BICE antigua, Pershing, Sura sin filas en USD), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
+- Las cartolas BICE no traen el tipo de cambio del euro, que el export pone en todos los saldos: se toma de otra cartola con el mismo cierre (Security y Larrainvial lo traen) o de `--tipo-cambio-eur`, que vale para las cartolas del último cierre.
+- Los dividendos y repartos de la cartola BICE nueva no dicen de qué instrumento son: si el monto por cuota cuadra con el de otro cliente el mismo día, o si la cuenta tiene una sola posición que pueda pagarlos, van con el nemotécnico y producto de ese instrumento, como en el export. Conviene correr juntas todas las cartolas del mes.
 - Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
 - `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
@@ -37,4 +39,4 @@ Si hay un export de BICE del mismo día (o los exports diarios del mes), `python
 
 ## Mantener la tabla maestra
 
-`datos/instrumentos.csv` se regenera desde un export de BICE con `python -m cartolas.catalogo "<carpeta del export>"`. Los instrumentos que no están en la tabla salen sin nemotécnico ni emisor y con un aviso en el reporte. Si la cartola nombra un instrumento distinto que el export, se agrega una fila a `datos/alias.csv` con el nombre de la cartola, la moneda y el nemotécnico.
+`datos/instrumentos.csv` se regenera desde uno o más exports de BICE con `python -m cartolas.catalogo "<carpeta del export>" ["<otra carpeta>" ...]`; si un nemotécnico aparece con nombres distintos, queda el del último día. Los instrumentos que no están en la tabla salen sin nemotécnico ni emisor y con un aviso en el reporte. Si la cartola nombra un instrumento distinto que el export, se agrega una fila a `datos/alias.csv` con el nombre de la cartola, la moneda y el nemotécnico.

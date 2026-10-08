@@ -122,3 +122,25 @@ def test_export_de_varios_dias(tmp_path):
     reporte = tmp_path / "r.md"
     assert main([str(export), str(tmp_path / "salida"), "--reporte", str(reporte)]) == 0
     assert "| MOVIMIENTOS_BOLSA | 2 | 2 | 2 | 0 | 0 | ninguna |" in reporte.read_text(encoding="utf-8")
+
+
+def test_empareja_primero_las_filas_mas_parecidas(tmp_path):
+    """Una fila de la salida sin par no le quita el suyo a otra con la misma clave."""
+    _escribir(tmp_path / "export", "2026-09-30", [], [], [_compra("1-9", "ACCION Y", "2026-09-30")])
+    # La compra del 12-09 sin par va primero; antes se quedaba con la del 30-09.
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-12"), _compra("1-9", "ACCION Y", "2026-09-30")],
+    )
+    escribir(
+        MOVIMIENTOS_BOLSA,
+        [_compra("1-9", "OTRA", "2026-09-12")],
+        tmp_path / "export" / MOVIMIENTOS_BOLSA.nombre_archivo("10038", "2026-09-12"),
+    )
+    reporte = tmp_path / "r.md"
+    main([str(tmp_path / "export"), str(tmp_path / "salida"), "--reporte", str(reporte)])
+    texto = reporte.read_text(encoding="utf-8")
+    assert "| MOVIMIENTOS_BOLSA | 2 | 2 | 1 | 1 | 1 | ninguna |" in texto

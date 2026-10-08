@@ -2,9 +2,9 @@
 
 Las cartolas traen el nombre del instrumento, pero no su nemotécnico, emisor
 ni el producto con que lo clasifica el export. La tabla `datos/instrumentos.csv`
-tiene esos datos por instrumento y se arma desde un export de BICE con:
+tiene esos datos por instrumento y se arma desde uno o más exports de BICE con:
 
-    python -m cartolas.catalogo "<carpeta del export>"
+    python -m cartolas.catalogo "<carpeta del export>" ["<otra carpeta>" ...]
 
 Solo guarda datos de los instrumentos (nombre, nemotécnico, moneda, emisor,
 producto y precio de cierre del día del export), nunca datos de clientes.
@@ -46,7 +46,8 @@ class Instrumento:
     moneda: str
     emisor: str
     producto: str
-    # Archivo de saldos al que va: SALDOS_FFMM o CUSTODIA_ACCIONES.
+    # Archivo de saldos al que va: SALDOS_FFMM, CUSTODIA_ACCIONES o (bonos)
+    # CUSTODIA_RENTA_FIJA, que la skill no escribe.
     archivo: str
     # Precio de cierre en la moneda del instrumento el día del export; sirve para
     # elegir entre series con el mismo nombre.
@@ -176,35 +177,48 @@ def tipo_cuenta(numero: str) -> TipoCuenta | None:
 # --- Construcción de la tabla desde un export ---------------------------------
 
 
-def construir_desde_export(carpeta: Path) -> list[Instrumento]:
+def construir_desde_export(carpetas: Path | list[Path]) -> list[Instrumento]:
     """Un instrumento por (nombre, nemotécnico, moneda) de los saldos y movimientos
-    del export, con el emisor, producto, archivo y precio más frecuentes."""
+    de los exports, con el emisor, producto y archivo más frecuentes y el precio
+    más frecuente del último día en que tiene precio. Si un nemotécnico aparece
+    con varios nombres, queda el del último día en que aparece."""
+    if isinstance(carpetas, Path):
+        carpetas = [carpetas]
     datos: dict[tuple[str, str, str], dict[str, Counter]] = defaultdict(
         lambda: defaultdict(Counter)
     )
-    fechas = set()
     for tipo, archivo in (
         ("SALDOS_FFMM", "SALDOS_FFMM"),
         ("CUSTODIA_ACCIONES", "CUSTODIA_ACCIONES"),
         ("MOVIMIENTOS_FFMM", "SALDOS_FFMM"),
         ("MOVIMIENTOS_BOLSA", "CUSTODIA_ACCIONES"),
     ):
-        for ruta in sorted(carpeta.glob(f"{tipo}_*.csv")):
+        for ruta in sorted(r for c in carpetas for r in c.glob(f"{tipo}_*.csv")):
             with open(ruta, encoding="cp1252", newline="") as f:
                 for r in csv.DictReader(f, delimiter=";"):
                     d = datos[(r["Instrumento"], r["NemotecnicoInstrumento"], r["MonedaInstrumento"])]
                     d["filas"][""] += 1
                     d["emisor"][r["Emisor"]] += 1
                     d["producto"][r["Producto"]] += 1
-                    d["archivo"][archivo] += 1
-                    fechas.add(r["FechaProceso"])
+                    # Los bonos van en el export a CUSTODIA_RENTA_FIJA, que la skill no escribe.
+                    d["archivo"]["CUSTODIA_RENTA_FIJA" if r["Producto"] == "RENTA FIJA" else archivo] += 1
+                    d["fecha"][r["FechaProceso"]] += 1
                     precio = _precio_en_moneda_instrumento(r)
                     if precio is not None:
-                        d["precio"][precio] += 1
-    fecha = max(fechas) if fechas else ""
+                        d["precio"][(r["FechaProceso"], precio)] += 1
+    # Un export trajo nemotécnicos con el nombre de otro instrumento; si un
+    # nemotécnico aparece con varios nombres, queda el del último día.
+    ultimo: dict[tuple[str, str], str] = defaultdict(str)
+    for (_, nemo, moneda), d in datos.items():
+        ultimo[(nemo, moneda)] = max(ultimo[(nemo, moneda)], max(d["fecha"]))
     instrumentos = []
     for (nombre, nemo, moneda), d in datos.items():
-        precio = d["precio"].most_common(1)[0][0] if d["precio"] else None
+        if nemo and max(d["fecha"]) < ultimo[(nemo, moneda)]:
+            continue
+        precio, fecha = None, ""
+        if d["precio"]:
+            fecha = max(f for f, _ in d["precio"])
+            precio = max((n, p) for (f, p), n in d["precio"].items() if f == fecha)[1]
         instrumentos.append(
             (
                 -d["filas"][""],
@@ -266,8 +280,8 @@ def guardar(instrumentos: list[Instrumento], ruta: Path = RUTA_TABLA) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("uso: python -m cartolas.catalogo <carpeta del export>")
-    tabla = construir_desde_export(Path(sys.argv[1]))
+    if len(sys.argv) < 2:
+        sys.exit("uso: python -m cartolas.catalogo <carpeta del export> [<otra carpeta> ...]")
+    tabla = construir_desde_export([Path(a) for a in sys.argv[1:]])
     guardar(tabla)
     print(f"{len(tabla)} instrumentos en {RUTA_TABLA}")

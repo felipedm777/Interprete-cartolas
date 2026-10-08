@@ -16,7 +16,7 @@ Reglas tomadas del export de ejemplo (docs/formato-salida.md):
 
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from .catalogo import Catalogo, Instrumento, TipoCuenta, tipo_cuenta
 from .formato import (
@@ -117,12 +117,27 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
             fila |= _patrimonio("CLP", tc, clp=clp)
             fila["MonedaValoracionPatrimonio"] = saldo.moneda
             fila["PatrimonioEnMonedaValoracion"] = saldo.monto
-        fila |= _cierre(tc, tc_eur)
+        fila |= _cierre(tc, tc_eur, saldo.en_transito)
         salida.agregar(SALDOS_CAJA.tipo, fila)
 
     for p in cartola.posiciones:
         que = f"{p.tabla} {p.instrumento}"
+        if p.tabla == "Cuentas por Pagar":
+            # Como en el export: caja en tránsito con el monto negativo.
+            cuenta = cuenta_exportable(p.cuenta, que)
+            if cuenta is not None:
+                fila = _cliente(cartola.rut, cuenta, "CUENTAS CAJA", cierre)
+                if p.moneda == "USD" and p.valor_usd is not None:
+                    fila |= _patrimonio("USD", tc, usd=p.valor_usd)
+                else:
+                    fila |= _patrimonio("CLP", tc, clp=p.valor_clp)
+                fila |= _cierre(tc, tc_eur, en_transito=True)
+                salida.agregar(SALDOS_CAJA.tipo, fila)
+            continue
         instrumento = _instrumento(catalogo, p.instrumento, p.moneda, p.precio_actual, p.nemotecnico)
+        if instrumento and instrumento.archivo not in (SALDOS_FFMM.tipo, CUSTODIA_ACCIONES.tipo):
+            salida.omitidos.append(f"{que} (cuenta {p.cuenta}): va a {instrumento.archivo}, que no se escribe")
+            continue
         if instrumento:
             archivo, producto = instrumento.archivo, instrumento.producto
         elif p.tabla in _POR_TABLA:
@@ -152,7 +167,7 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
             continue
         if m.tipo in _MOVIMIENTOS_DOLAR:
             producto, instrumento = "FORWARDS DIVISA", "DOLAR"
-        elif m.instrumento and ("DIVIDENDO" in m.tipo or "DISMINUCION" in m.tipo):
+        elif m.instrumento and any(x in m.tipo for x in ("DIVIDENDO", "DISMINUCION", "REPARTO")):
             # Como en el export, los dividendos van con el instrumento y su producto;
             # el resto de los movimientos, con la caja.
             datos = catalogo.buscar_nemotecnico(m.instrumento)
@@ -237,7 +252,8 @@ def _instrumento(
 ) -> Instrumento | None:
     if nemotecnico and (i := catalogo.buscar_nemotecnico(nemotecnico, moneda)):
         return i
-    return catalogo.buscar(nombre, moneda, precio)
+    # Algunos fondos de inversión vienen en la cartola solo con su nemotécnico.
+    return catalogo.buscar(nombre, moneda, precio) or catalogo.buscar_nemotecnico(nombre, moneda)
 
 
 def _cliente(rut: str, cuenta: Cuenta, producto: str, fecha: date) -> dict:
@@ -298,8 +314,8 @@ def _valor_posicion(
             return _patrimonio("USD", tc, usd=p.valor_usd)
         return _patrimonio("CLP", tc, clp=clp)
     if archivo == SALDOS_FFMM.tipo and p.cantidad is not None and p.precio_actual is not None:
-        # Como en el export: patrimonio = cuotas × valor cuota, sin redondear.
-        valor = p.cantidad * p.precio_actual
+        # Como en el export: patrimonio = cuotas × valor cuota, truncado a 4 decimales.
+        valor = (p.cantidad * p.precio_actual).quantize(Decimal("0.0001"), ROUND_DOWN)
         return _patrimonio(moneda, tc, clp=valor, usd=valor)
     if moneda == "USD":
         # La cartola BICE muestra los USD redondeados a entero; los centavos
@@ -314,6 +330,5 @@ def _valor_posicion(
     return _patrimonio("CLP", tc, clp=p.valor_clp)
 
 
-def _cierre(tc: Decimal | None, tc_eur: Decimal | None = None) -> dict:
-    # Ninguna cartola marca saldos en tránsito.
-    return {"EnTransito": "NO", "TipoCambioUSD": tc, "TipoCambioEUR": tc_eur}
+def _cierre(tc: Decimal | None, tc_eur: Decimal | None = None, en_transito: bool = False) -> dict:
+    return {"EnTransito": "SI" if en_transito else "NO", "TipoCambioUSD": tc, "TipoCambioEUR": tc_eur}

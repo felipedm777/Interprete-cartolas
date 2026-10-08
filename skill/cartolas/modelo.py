@@ -26,6 +26,9 @@ class SaldoCaja:
     monto: Decimal
     # Equivalente en pesos impreso en la cartola, si lo trae.
     monto_clp: Decimal | None = None
+    # Pendiente de liquidación (cuentas por cobrar o por pagar): el export lo
+    # trae como caja con EnTransito = SI.
+    en_transito: bool = False
 
 
 @dataclass

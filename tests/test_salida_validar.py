@@ -181,3 +181,59 @@ def test_pershing(tmp_path):
     assert "TipoAPV" not in compra
     escribir(MOVIMIENTOS_PERSHING, s.filas["MOVIMIENTOS_PERSHING"], tmp_path / "m.csv")
     assert (tmp_path / "m.csv").read_text(encoding="utf-8").splitlines()[2].startswith("3,0000;2026-01-10;;EXT1;EXT1;")
+
+
+def test_caja_en_transito():
+    """Cuentas por cobrar y por pagar van a la caja con EnTransito = SI."""
+    c = _cartola()
+    c.saldos_caja.append(SaldoCaja("0", "CLP", D("400"), D("400"), en_transito=True))
+    c.posiciones.append(_posicion("0", "Cuentas por Pagar", "CUENTAS-PAGAR", "CLP", "0", "0", "-400", seccion="Pasivos"))
+    c.posiciones[-1].cantidad = c.posiciones[-1].precio_actual = None
+    c.totales |= {"cobrar:0": D("400"), "cobrar": D("400"), "total:Pasivos": D("-400")}
+    assert all(x.ok for x in validar(c)), [x for x in validar(c) if not x.ok]
+    caja = [f for f in generar(c, CATALOGO).filas["SALDOS_CAJA"] if f["EnTransito"] == "SI"]
+    assert [(f["Cuenta"], f["PatrimonioEnMonedaValoracion"], f["Producto"]) for f in caja] == [
+        ("0", D("400"), "CUENTAS CAJA"),
+        ("0", D("-400"), "CUENTAS CAJA"),
+    ]
+
+
+def test_fondos_mutuos_truncados_a_4_decimales():
+    c = _cartola()
+    c.posiciones[0].cantidad, c.posiciones[0].precio_actual = D("0.0152"), D("1303.7338")
+    (ffmm,) = generar(c, CATALOGO).filas["SALDOS_FFMM"]
+    assert ffmm["PatrimonioEnMonedaValoracion"] == D("19.8167")  # 19,81675376 en el export queda 19,8167
+
+
+def test_traspaso_con_monto_distinto_solo_avisa():
+    c = _cartola()
+    c.movimientos_titulos.append(
+        MovimientoTitulo(date(2026, 1, 9), "0", "INGRESO RV", "FONDO INVERSION Y", "CLP", D("7"), D("1438"), D("10960"))
+    )
+    assert all(x.ok for x in validar(c))
+    assert any(a.startswith("Traspaso") for a in c.avisos)
+
+
+def test_dividendo_con_instrumento():
+    c = _cartola()
+    c.movimientos_caja[1].instrumento = "CFI-Y"
+    c.movimientos_caja.append(MovimientoCaja(date(2026, 1, 6), "0", "REPARTO DE DINERO", "CLP", D("0"), D("5"), instrumento="CFI-Y"))
+    _, dividendo, reparto = generar(c, CATALOGO).filas["MOVIMIENTOS_DE_CAJA"]
+    assert (dividendo["Instrumento"], dividendo["Producto"]) == ("CFI-Y", "CFI")
+    assert (reparto["Instrumento"], reparto["Producto"]) == ("CFI-Y", "CFI")
+
+
+def test_caja_en_dolares_que_la_cartola_no_muestra():
+    c = _cartola()
+    for clave in ("cuenta:1", "grupo:Cuenta de Inversión", "patrimonio"):
+        c.totales[clave] += D("30")  # US$ 0,03 que no aparecen en el detalle de caja
+    assert all(x.ok for x in validar(c)), [x for x in validar(c) if not x.ok]
+    assert any(a.startswith("La cuenta 1 suma 30 pesos menos") for a in c.avisos)
+    c.totales["cuenta:1"] += D("600")  # más de medio dólar: no se explica así
+    assert any(not x.ok for x in validar(c))
+
+
+def test_opciones_por_contrato():
+    c = _cartola()
+    c.posiciones.append(_posicion("EXT1", "Opciones", "CALL 100 ACCION EXP 10-16-26", "USD", "1", "6.2", "620000"))
+    assert all(x.ok for x in validar(c) if x.regla.startswith("Cantidad × precio = valor"))

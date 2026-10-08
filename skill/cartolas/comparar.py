@@ -97,26 +97,40 @@ def comparar(
     r.filas_export, r.filas_salida = len(export), len(salida)
     claves = _CLAVES[archivo.tipo]
     columnas = [c for c in archivo.encabezados if c not in ignorar]
-    libres: dict[tuple, list[dict]] = defaultdict(list)
+    grupos: dict[tuple, tuple[list[dict], list[dict]]] = defaultdict(lambda: ([], []))
     for f in export:
-        libres[_clave(f, claves)].append(f)
-
+        grupos[_clave(f, claves)][0].append(f)
     for f in salida:
-        clave = _clave(f, claves)
-        candidatos = libres.get(clave)
-        if not candidatos:
-            r.solo_salida.append(_mostrar(f, claves))
-            continue
-        par = max(candidatos, key=lambda e: sum(iguales(archivo, c, f[c], e[c]) for c in columnas))
-        candidatos.remove(par)
-        r.pares += 1
-        for c in columnas:
-            if iguales(archivo, c, f[c], par[c]):
-                r.iguales[c] += 1
-            else:
-                r.distintas[c] += 1
-                if len(r.diferencias[c]) < _EJEMPLOS:
-                    r.diferencias[c].append(f"{_mostrar(f, claves)}: {f[c]!r} ≠ {par[c]!r}")
+        grupos[_clave(f, claves)][1].append(f)
+
+    libres: dict[tuple, list[dict]] = {}
+    for clave, (del_export, de_salida) in grupos.items():
+        # Entre las filas con la misma clave se emparejan primero las que más
+        # columnas comparten, para que una fila sin par no le quite el suyo a otra.
+        candidatos = sorted(
+            (
+                (-sum(iguales(archivo, c, f[c], e[c]) for c in columnas), i, j)
+                for i, f in enumerate(de_salida)
+                for j, e in enumerate(del_export)
+            ),
+        )
+        usadas_s, usadas_e = set(), set()
+        for _, i, j in candidatos:
+            if i in usadas_s or j in usadas_e:
+                continue
+            usadas_s.add(i)
+            usadas_e.add(j)
+            f, par = de_salida[i], del_export[j]
+            r.pares += 1
+            for c in columnas:
+                if iguales(archivo, c, f[c], par[c]):
+                    r.iguales[c] += 1
+                else:
+                    r.distintas[c] += 1
+                    if len(r.diferencias[c]) < _EJEMPLOS:
+                        r.diferencias[c].append(f"{_mostrar(f, claves)}: {f[c]!r} ≠ {par[c]!r}")
+        r.solo_salida += [_mostrar(f, claves) for i, f in enumerate(de_salida) if i not in usadas_s]
+        libres[clave] = [e for j, e in enumerate(del_export) if j not in usadas_e]
     r.solo_export = [_mostrar(e, claves) for resto in libres.values() for e in resto]
     return r
 

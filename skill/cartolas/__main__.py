@@ -12,15 +12,18 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pymupdf
 
+from . import dividendos
 from .catalogo import Catalogo
 from .exportar import escribir
 from .extractores import detectar
 from .formato import ARCHIVOS
 from .modelo import Cartola
+from .numeros import leer_monto
 from .salida import Salida, generar
 from .validar import validar
 
@@ -70,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--fecha", help="fecha para el nombre de los archivos, AAAA-MM-DD (por defecto, el último cierre)")
     parser.add_argument("--solo-afi", action="store_true", help="exportar solo los portafolios de AFI Trading")
+    parser.add_argument(
+        "--tipo-cambio-eur",
+        help="tipo de cambio del euro al último cierre (p. ej. 1102,72109), para las cartolas que no lo "
+        "traen; por defecto se toma de otra cartola con el mismo cierre",
+    )
     args = parser.parse_args(argv)
 
     archivos = _pdfs(args.entradas)
@@ -81,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     _preferir_definitivas(resultados)
     cartolas = [r.cartola for r in resultados if r.cartola]
     _completar_tipo_cambio(resultados)
+    _completar_euro(resultados, leer_monto(args.tipo_cambio_eur) if args.tipo_cambio_eur else None)
     catalogo = Catalogo.cargar()
+    dividendos.inferir(cartolas, catalogo)
     for r in resultados:
         if r.cartola:
             r.cartola.controles += validar(r.cartola)
@@ -204,6 +214,26 @@ def _completar_tipo_cambio(resultados: list[Resultado]) -> None:
                 "La cartola no trae tipo de cambio y no hay otra con el mismo cierre: "
                 "los equivalentes en pesos de lo que está en USD quedan vacíos"
             )
+
+
+def _completar_euro(resultados: list[Resultado], indicado: Decimal | None) -> None:
+    """Las cartolas BICE no traen el tipo de cambio del euro, que el export pone
+    en todas las filas de saldos: se usa el de otra cartola con el mismo cierre
+    (Security y Larrainvial lo traen) o, en las del último cierre, el indicado."""
+    cartolas = [r.cartola for r in resultados if r.cartola]
+    ultimo = max((c.hasta for c in cartolas), default=None)
+    for c in cartolas:
+        if c.tipo_cambio_eur:
+            continue
+        otros = Counter(o.tipo_cambio_eur for o in cartolas if o.tipo_cambio_eur and o.hasta == c.hasta)
+        if otros:
+            c.tipo_cambio_eur = otros.most_common(1)[0][0]
+            c.avisos.append(
+                f"La cartola no trae el tipo de cambio del euro: se usó {c.tipo_cambio_eur} de otras "
+                f"cartolas con cierre {c.hasta:%d-%m-%Y}"
+            )
+        elif indicado and c.hasta == ultimo:
+            c.tipo_cambio_eur = indicado
 
 
 def _tiene_dolares(c: Cartola) -> bool:

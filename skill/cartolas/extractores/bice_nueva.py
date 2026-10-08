@@ -144,11 +144,17 @@ def _grilla(spans: list[Span]) -> list[dict]:
         {"etiqueta": e.texto, "negrita": e.negrita, "yc": e.yc, "celdas": defaultdict(list)}
         for e in etiquetas
     ]
+    x_columnas = min((c.x0 for c in columnas), default=100)
     for s in spans:
         if s.x0 < 100 or s in encabezados or s.y0 < primera - 8 or s.tamano >= 7:
             continue
         fila = min(filas, key=lambda f: abs(f["yc"] - s.yc))
-        if abs(fila["yc"] - s.yc) <= 11:
+        if abs(fila["yc"] - s.yc) > 11:
+            continue
+        if s.x1 < x_columnas - 5:
+            # Continuación de la etiqueta, p. ej. el RUT del "PORTAFOLIO COPARTICIPE".
+            fila["etiqueta"] += f" {s.texto}"
+        else:
             fila["celdas"][columna_de(s, columnas)].append(s)
     return filas
 
@@ -184,11 +190,32 @@ def _resumen_cuentas(spans: list[Span], cartola: Cartola) -> None:
 
 
 def _detalle_caja(spans: list[Span], cartola: Cartola) -> None:
+    """La página trae la tabla "Caja" y, si hay montos por liquidar, "Cuentas
+    por Cobrar" con las mismas columnas; esta va como caja en tránsito."""
+    titulos = sorted(
+        (s for s in spans if s.negrita and s.tamano == 8.2 and s.x0 < _X_IZQUIERDA), key=lambda s: s.y0
+    )
+    if not titulos:
+        _tabla_caja(spans, cartola, "caja", False)
+        return
+    for i, titulo in enumerate(titulos):
+        # Los encabezados de dos líneas empiezan unos 5 pt sobre el título.
+        y_fin = titulos[i + 1].y0 - 7 if i + 1 < len(titulos) else 10_000
+        region = [s for s in spans if titulo.y0 - 7 <= s.y0 < y_fin]
+        if titulo.texto == "Caja":
+            _tabla_caja(region, cartola, "caja", False)
+        elif titulo.texto == "Cuentas por Cobrar":
+            _tabla_caja(region, cartola, "cobrar", True)
+        else:
+            cartola.avisos.append(f"Tabla {titulo.texto} en el detalle de caja: no se exporta")
+
+
+def _tabla_caja(spans: list[Span], cartola: Cartola, total: str, en_transito: bool) -> None:
     for fila in _grilla(spans):
         celdas = fila["celdas"]
         valor = _montos(celdas.get("Valor de Mercado", [])).get("CLP", Decimal(0))
         if fila["etiqueta"] == "Total":
-            cartola.totales["caja"] = valor
+            cartola.totales[total] = valor
             continue
         if fila["negrita"]:
             continue
@@ -197,7 +224,7 @@ def _detalle_caja(spans: list[Span], cartola: Cartola) -> None:
         dolar = _montos(celdas.get("Dólar", []))
         euro = _montos(celdas.get("Euro", [])).get("CLP")
         if pesos:
-            cartola.saldos_caja.append(SaldoCaja(numero, "CLP", pesos, pesos))
+            cartola.saldos_caja.append(SaldoCaja(numero, "CLP", pesos, pesos, en_transito))
         if dolar.get("CLP") or dolar.get("USD"):
             # El detalle muestra los dólares redondeados a entero; los centavos se
             # recuperan del equivalente en pesos, que se calculó con los dólares exactos.
@@ -205,10 +232,10 @@ def _detalle_caja(spans: list[Span], cartola: Cartola) -> None:
             usd = dolar.get("USD", Decimal(0))
             if clp is not None and cartola.tipo_cambio_usd:
                 usd = (clp / cartola.tipo_cambio_usd).quantize(Decimal("0.01"))
-            cartola.saldos_caja.append(SaldoCaja(numero, "USD", usd, clp))
+            cartola.saldos_caja.append(SaldoCaja(numero, "USD", usd, clp, en_transito))
         if euro:
             cartola.avisos.append(f"Caja en euros en la cuenta {numero}: no se exporta")
-        cartola.totales[f"caja:{numero}"] = valor
+        cartola.totales[f"{total}:{numero}"] = valor
 
 
 # --- Tablas de detalle y movimientos (columnas con encabezado) ---------------

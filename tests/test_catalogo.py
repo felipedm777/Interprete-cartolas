@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from cartolas.catalogo import RUTA_TABLA, Catalogo, Instrumento, tipo_cuenta
+from cartolas.catalogo import RUTA_TABLA, Catalogo, Instrumento, construir_desde_export, tipo_cuenta
+from cartolas.exportar import escribir
+from cartolas.formato import CUSTODIA_ACCIONES
 
 
 def _instrumento(nombre, nemo, moneda, precio=None):
@@ -49,5 +51,23 @@ def test_tabla_maestra_del_repositorio():
     catalogo = Catalogo.cargar()
     assert RUTA_TABLA.exists() and len(catalogo.instrumentos) > 200
     archivos = {i.archivo for i in catalogo.instrumentos}
-    assert archivos == {"SALDOS_FFMM", "CUSTODIA_ACCIONES"}
+    assert archivos == {"SALDOS_FFMM", "CUSTODIA_ACCIONES", "CUSTODIA_RENTA_FIJA"}
     assert all(i.moneda in ("CLP", "USD") for i in catalogo.instrumentos)
+
+
+def test_construir_con_varios_exports(tmp_path):
+    """Si un nemotécnico cambia de nombre entre exports, queda el del último día."""
+
+    def fila(fecha, nombre, precio):
+        return {
+            "FechaProceso": fecha, "Instrumento": nombre, "NemotecnicoInstrumento": "CFI-X",
+            "MonedaInstrumento": "CLP", "Emisor": "AGF", "Producto": "CFI", "Cantidad": Decimal(2),
+            "MonedaValoracionPatrimonio": "CLP", "PrecioCierreEnMonedaValoracion": Decimal(precio),
+            "PatrimonioEnMonedaValoracion": Decimal(precio) * 2, "TipoCambioUSD": Decimal(900),
+        }  # fmt: skip
+
+    for carpeta, fecha, nombre, precio in (("a", "2026-09-22", "NOMBRE MALO", "10"), ("b", "2026-09-30", "FONDO X", "11")):
+        (tmp_path / carpeta).mkdir()
+        escribir(CUSTODIA_ACCIONES, [fila(fecha, nombre, precio)], tmp_path / carpeta / "CUSTODIA_ACCIONES_1_x.csv")
+    (x,) = construir_desde_export([tmp_path / "a", tmp_path / "b"])
+    assert (x.nombre, x.nemotecnico, x.precio_referencia, x.fecha_referencia) == ("FONDO X", "CFI-X", Decimal(11), "2026-09-30")
