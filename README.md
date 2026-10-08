@@ -20,6 +20,7 @@ Las cartolas contienen datos reales de clientes, así que:
 - `skill/`: la skill (`SKILL.md`) y el paquete Python `cartolas` que lee las cartolas y escribe los archivos de salida.
 - `docs/formato-salida.md`: formato de los archivos de saldos y movimientos, tomado del export de ejemplo.
 - `docs/inventario.md`: formatos de cartola encontrados, cómo extraerlos y validarlos, y preguntas abiertas. El detalle por institución está en `docs/instituciones/`.
+- `docs/eventos-capital.md`: cómo se identifican y se comprueban los abonos por dividendos, repartos y disminuciones de capital contra los repartos que publica DataFondos.
 - `tests/`: pruebas (`python3 -m pytest tests`). Las que usan cartolas reales corren solo donde existen sus copias anonimizadas.
 
 ## Uso
@@ -33,6 +34,8 @@ python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>"
 ```
 
 Deja en la carpeta de salida un juego de 7 CSV por institución y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.
+
+Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban contra los repartos que publica DataFondos, que vienen en la tabla `skill/cartolas/datos/eventos_capital.csv`: eso identifica el fondo de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que la tabla no explica queda como caja y se informa en el reporte con su causa. Si Claude Code tiene conectado el MCP de DataFondos, la skill le indica consultar los fondos que faltan y volver a correr ("Eventos de capital con DataFondos" en `skill/SKILL.md`). Las reglas y lo que alcanza a cubrir están en `docs/eventos-capital.md`.
 
 Para comparar la salida con un export de BICE del mismo día, fila por fila:
 

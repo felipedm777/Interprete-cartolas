@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pymupdf
 
-from . import dividendos
+from . import dividendos, eventos_capital
 from .catalogo import Catalogo
 from .exportar import escribir
 from .extractores import detectar
@@ -78,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
         help="tipo de cambio del euro al último cierre (p. ej. 1102,72109), para las cartolas que no lo "
         "traen; por defecto se toma de otra cartola con el mismo cierre",
     )
+    parser.add_argument(
+        "--eventos-capital",
+        help="tabla de dividendos y repartos de DataFondos para identificar y comprobar los abonos "
+        f"por eventos de capital (por defecto, {eventos_capital.RUTA_TABLA.name} de la skill; "
+        "'no' para no usar ninguna)",
+    )
     args = parser.parse_args(argv)
 
     archivos = _pdfs(args.entradas)
@@ -92,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     _completar_euro(resultados, leer_monto(args.tipo_cambio_eur) if args.tipo_cambio_eur else None)
     catalogo = Catalogo.cargar()
     dividendos.inferir(cartolas, catalogo)
+    tabla = _tabla_eventos(args.eventos_capital, parser)
+    cobertura = _cobertura(args.eventos_capital, parser)
+    conciliacion = eventos_capital.conciliar(cartolas, catalogo, tabla, cobertura)
     for r in resultados:
         if r.cartola:
             r.cartola.controles += validar(r.cartola)
@@ -119,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     nombres = "_".join(n for n, _, _ in resumen) or codigo
     reporte = carpeta / f"REPORTE_{nombres}_{fecha_reporte.replace('-', '')}.md"
-    reporte.write_text(_reporte(resultados, resumen), encoding="utf-8")
+    reporte.write_text(_reporte(resultados, resumen, tabla, conciliacion, cobertura), encoding="utf-8")
 
     sin_cuadrar = sum(1 for c in cartolas if not all(x.ok for x in c.controles))
     fallidos = sum(1 for r in resultados if r.error and not r.duplicado)
@@ -131,8 +140,39 @@ def main(argv: list[str] | None = None) -> int:
     for nombre, fecha, total in resumen:
         filas = ", ".join(f"{tipo} {len(total.filas.get(tipo, []))}" for tipo in ARCHIVOS)
         print(f"  {nombre} al {fecha}: {filas}")
+    print(
+        f"Eventos de capital con DataFondos: {conciliacion.confirmados} confirmados, "
+        f"{conciliacion.asignados} identificados, {len(conciliacion.dudosos)} dudosos, "
+        f"{len(conciliacion.revisar)} por revisar."
+    )
+    if conciliacion.pendientes:
+        fondos = len({nemo for nemo, _ in conciliacion.pendientes})
+        print(f"  {fondos} fondos por consultar en DataFondos: ver \"Eventos de capital\" en el reporte.")
     print(f"Reporte: {reporte}")
     return 1 if sin_cuadrar or fallidos else 0
+
+
+def _cobertura(opcion: str | None, parser: argparse.ArgumentParser) -> eventos_capital.Cobertura:
+    """Qué fondos sigue DataFondos: la cobertura de la skill, salvo con `--eventos-capital no`."""
+    if opcion and opcion.lower() == "no":
+        return eventos_capital.Cobertura([])
+    try:
+        return eventos_capital.Cobertura.cargar()
+    except (OSError, ValueError) as e:
+        parser.error(f"no se pudo leer la cobertura de DataFondos: {e}")
+
+
+def _tabla_eventos(opcion: str | None, parser: argparse.ArgumentParser) -> eventos_capital.Tabla:
+    """Tabla de eventos de capital indicada, la de la skill, o una vacía."""
+    if opcion and opcion.lower() == "no":
+        return eventos_capital.Tabla([])
+    ruta = Path(opcion) if opcion else eventos_capital.RUTA_TABLA
+    if opcion and not ruta.exists():
+        parser.error(f"no existe la tabla de eventos de capital {ruta}")
+    try:
+        return eventos_capital.Tabla.cargar(ruta)
+    except (ValueError, OSError) as e:
+        parser.error(f"no se pudo leer la tabla de eventos de capital: {e}")
 
 
 def _extraer(archivos: list[Path]) -> list[Resultado]:
@@ -243,7 +283,13 @@ def _tiene_dolares(c: Cartola) -> bool:
     )
 
 
-def _reporte(resultados: list[Resultado], resumen: list[tuple[str, str, Salida]]) -> str:
+def _reporte(
+    resultados: list[Resultado],
+    resumen: list[tuple[str, str, Salida]],
+    tabla: eventos_capital.Tabla | None = None,
+    conciliacion: eventos_capital.Conciliacion | None = None,
+    cobertura: eventos_capital.Cobertura | None = None,
+) -> str:
     lineas = ["# Reporte de extracción", ""]
     lineas += [
         "| Archivo | Formato | Período | Cuadraturas | Posiciones | Mov. caja | Mov. títulos | Avisos |",
@@ -266,6 +312,8 @@ def _reporte(resultados: list[Resultado], resumen: list[tuple[str, str, Salida]]
         lineas.append(f"- **{nombre}** al {fecha}:")
         for tipo in ARCHIVOS:
             lineas.append(f"  - {tipo}: {len(total.filas.get(tipo, []))}")
+    if conciliacion is not None and tabla is not None:
+        lineas += _reporte_eventos(tabla, conciliacion, cobertura or eventos_capital.Cobertura([]))
     for r in resultados:
         c, s = r.cartola, r.salida
         if c is None:
@@ -279,6 +327,61 @@ def _reporte(resultados: list[Resultado], resumen: list[tuple[str, str, Salida]]
         lineas += _sin_repetir("Aviso", c.avisos + s.avisos)
         lineas += _sin_repetir("No exportado", s.omitidos)
     return "\n".join(lineas) + "\n"
+
+
+def _reporte_eventos(
+    tabla: eventos_capital.Tabla,
+    conciliacion: eventos_capital.Conciliacion,
+    cobertura: eventos_capital.Cobertura,
+) -> list[str]:
+    """Qué explicó la tabla de DataFondos, por qué quedaron los dudosos y qué
+    hay que consultar."""
+    lineas = ["", "## Eventos de capital (DataFondos)", ""]
+    if not len(tabla):
+        lineas.append("- Sin tabla de eventos: los abonos por dividendos y repartos no se comprobaron.")
+        return lineas
+    periodo = tabla.periodo()
+    lineas.append(
+        f"- Tabla: {len(tabla)} eventos"
+        + (f", pagos del {periodo[0]:%d-%m-%Y} al {periodo[1]:%d-%m-%Y}" if periodo else "")
+    )
+    actualizada = cobertura.actualizada()
+    lineas.append(
+        f"- Cobertura de DataFondos: {len(cobertura)} fondos y series"
+        + (f", actualizada al {actualizada:%d-%m-%Y}" if actualizada else "")
+        if len(cobertura)
+        else "- Sin cobertura de DataFondos: todo fondo que no está en la tabla queda por consultar. "
+        "Guardar la respuesta de `resumen_dividendos` y agregarla con `python -m cartolas.eventos_capital`."
+    )
+    lineas.append(f"- Abonos confirmados (instrumento y monto cuadran): {conciliacion.confirmados}")
+    lineas.append(f"- Abonos identificados con la tabla: {conciliacion.asignados}")
+    lineas.append(f"- Abonos dudosos: {len(conciliacion.dudosos)}")
+    for causa in eventos_capital.CAUSAS:
+        if conciliacion.causas[causa]:
+            lineas.append(f"  - {causa}: {conciliacion.causas[causa]}")
+    lineas.append(f"- Abonos por revisar: {len(conciliacion.revisar)}")
+    if conciliacion.pendientes:
+        lineas += [
+            "",
+            "Fondos por consultar en DataFondos: pedir `dividendos` con el RUT y el nemotécnico de "
+            "cada uno, guardar las respuestas, agregarlas con `python -m cartolas.eventos_capital` y "
+            "volver a correr la skill.",
+            "",
+            "| Nemotécnico en DataFondos | RUT del fondo | Meses |",
+            "|---|---|---|",
+        ]
+        por_fondo: dict[str, set[str]] = defaultdict(set)
+        for nemo, periodo_falta in conciliacion.pendientes:
+            por_fondo[nemo].add(periodo_falta)
+        for nemo in sorted(por_fondo):
+            seguido = cobertura.buscar(nemo)
+            nombre, rut = (
+                (seguido.nemotecnico, seguido.rut_fondo)
+                if seguido
+                else (nemo, "buscarlo con `resumen_dividendos`")
+            )
+            lineas.append(f"| {nombre} | {rut} | {', '.join(sorted(por_fondo[nemo]))} |")
+    return lineas
 
 
 def _sin_repetir(prefijo: str, textos: list[str]) -> list[str]:
