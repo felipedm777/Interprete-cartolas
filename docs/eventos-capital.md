@@ -61,7 +61,9 @@ repartos de capital, 6 emisiones liberadas), con pagos del 05-08-2025 al
 
 ## Cómo se explica un abono
 
-Para cada movimiento de caja de los tipos de `TIPOS_CAJA`:
+Para cada abono de los tipos de `TIPOS_CAJA` (los cargos `PAGO DE DIVIDENDOS`
+son el pago al cliente de un dividendo ya abonado, no el evento, y el export los
+deja como caja):
 
 1. Se buscan los eventos de los fondos que la cuenta tiene en cartera, de la
    clase que corresponde al tipo del movimiento (un `REPARTO DE DINERO` acepta
@@ -90,6 +92,10 @@ cartola sí cuadra con el publicado.
 Las cuotas se suman por cuenta y nemotécnico, así que un fondo con varias
 posiciones en la misma cuenta se trata como una sola.
 
+Los nemotécnicos se comparan sin guiones: un mismo fondo y serie se escribe
+`CFI-AMG3RE` o `CFIAMG3R-E`, el export de BICE usa los dos y DataFondos a veces
+publica solo uno.
+
 ## Lo que no alcanza a cubrir
 
 - **Dividendos de acciones.** DataFondos publica los repartos de los fondos; los
@@ -107,19 +113,29 @@ Con las 480 cartolas BICE de septiembre de 2026 (`Cartolas BICE SFTP/202609`):
 
 | | Abonos |
 |---|---:|
-| Confirmados (instrumento y monto cuadran con el reparto publicado) | 583 |
-| Identificados con la tabla (no traían instrumento) | 3 |
-| Dudosos | 31 |
+| Confirmados (instrumento y monto cuadran con el reparto publicado) | 585 |
+| Identificados con la tabla (no traían instrumento) | 5 |
+| Dudosos | 10 |
 | Contradicciones con la cartola | 0 |
 
-De los 31 dudosos, 22 son dividendos de acciones o de ETF extranjeros y 9 son de
-fondos que no están en la tabla. Comparada con el export de BICE del mismo
-período, la salida de los portafolios de AFI queda **idéntica** a la de antes de
-este cambio: los tres abonos identificados son de portafolios que el export no
-trae. De los dos que el export sí permite comprobar en `Training Data`
-(`CFILBKA2-E` y `CFIAFOGAPA`), los dos coinciden con el instrumento del export.
+Comparada con el export de BICE del mismo período, la salida de los portafolios
+de AFI queda **idéntica** a la de antes de este cambio: los cinco abonos
+identificados son de portafolios que el export no trae. De los dos que el export
+sí permite comprobar en `Training Data` (`CFILBKA2-E` y `CFIAFOGAPA`), los dos
+coinciden con el instrumento del export.
 
-Con las 59 cartolas de `Training Data` (los 6 formatos): 100 abonos confirmados
-y 5 identificados, 6 dudosos y ninguna contradicción. Los 5 identificados son 2
+Los 10 dudosos se buscaron uno por uno en DataFondos y ninguno se puede
+confirmar con lo que publica:
+
+| Dudosos | Por qué DataFondos no los explica |
+|---:|---|
+| 4 | Dividendos de acciones (el export confirma dos: `LIPIGAS` y `MALLPLAZA`). DataFondos sigue solo 11 acciones y ninguna de estas; `CHILE`, que sí sigue, no pagó dividendo en septiembre |
+| 4 | Los fondos de la cuenta que podrían pagarlos no están en DataFondos (`CFI-CARSGE`, que es el que dice el export, `CFISDA5F-E`, `CFIBCIRFCL`, `CFIVNTFIIV`) o están sin repartos ese mes (`CFIBTGPLAA`, `CFILCEUP-E`) |
+| 2 | Dividendos en dólares del mismo día en dos cuentas, que no cuadran con ningún reparto publicado de los fondos de la cuenta. El único fondo de esas cuentas sin repartos en la tabla es `CFI-ANM7AE`, que DataFondos sigue sin ningún reparto publicado |
+
+Con las 59 cartolas de `Training Data` (los 6 formatos): 102 abonos confirmados
+y 5 identificados, 5 dudosos y ninguna contradicción. Los 5 identificados son 2
 de BICE nueva —que con solo 20 cartolas del mes no se pueden deducir comparando
-clientes— y 3 de Sura, que no traen instrumento y antes salían como caja.
+clientes— y 3 de Sura, que no traen instrumento y antes salían como caja. Los 5
+dudosos son de Sura: 3 de una cuenta con acciones y 2 de fondos que DataFondos
+sigue pero sin un reparto que cuadre en la fecha.

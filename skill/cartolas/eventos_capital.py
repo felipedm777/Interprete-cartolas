@@ -192,7 +192,7 @@ class Tabla:
         self.eventos = eventos
         self._por_nemo: dict[str, list[Evento]] = {}
         for e in eventos:
-            self._por_nemo.setdefault(e.nemotecnico.upper(), []).append(e)
+            self._por_nemo.setdefault(_nemo_clave(e.nemotecnico), []).append(e)
 
     def __len__(self) -> int:
         return len(self.eventos)
@@ -233,7 +233,7 @@ class Tabla:
         clases = _EQUIVALENTES.get(clase, (clase,))
         return [
             e
-            for e in self._por_nemo.get(nemotecnico.upper(), [])
+            for e in self._por_nemo.get(_nemo_clave(nemotecnico), [])
             if e.clase in clases
             and not e.anulado
             and e.monto_por_cuota
@@ -243,7 +243,17 @@ class Tabla:
         ]
 
     def cubre(self, nemotecnico: str) -> bool:
-        return nemotecnico.upper() in self._por_nemo
+        return _nemo_clave(nemotecnico) in self._por_nemo
+
+
+def _nemo_clave(nemotecnico: str) -> str:
+    """El nemotécnico sin guiones, para buscarlo en la tabla.
+
+    Un mismo fondo y serie se escribe con el guion en dos lugares, y el export de
+    BICE usa los dos: `CFI-AMG3RE` y `CFIAMG3R-E`. DataFondos a veces publica
+    solo uno.
+    """
+    return nemotecnico.upper().replace("-", "")
 
 
 def _parece_fondo(nemotecnico: str) -> bool:
@@ -317,7 +327,9 @@ def _conciliar_cartola(cartola: Cartola, catalogo: Catalogo, tabla: Tabla) -> Co
         clase, moneda_tipo = TIPOS_CAJA[m.tipo]
         moneda = moneda_tipo or m.moneda
         monto = _monto(m)
-        if not monto:
+        if monto <= 0:
+            # Un cargo (PAGO DE DIVIDENDOS) es el pago al cliente de un dividendo
+            # ya abonado, no el evento: el export lo deja como caja.
             continue
         posiciones = cuotas.get(m.cuenta, {})
         # (nemotécnico, evento) que explican el abono: por el monto por cuota que
@@ -332,7 +344,7 @@ def _conciliar_cartola(cartola: Cartola, catalogo: Catalogo, tabla: Tabla) -> Co
         ]
         donde = f"{m.tipo} {moneda} del {m.fecha:%d-%m-%Y}"
         if m.instrumento:
-            propios = [(n, e) for n, e in explican if n.upper() == m.instrumento.upper()]
+            propios = [(n, e) for n, e in explican if _nemo_clave(n) == _nemo_clave(m.instrumento)]
             if propios:
                 resultado.confirmados += 1
             elif tabla.buscar(m.instrumento, clase, m.fecha, moneda):

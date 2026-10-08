@@ -133,6 +133,28 @@ def test_el_monto_por_cuota_impreso_confirma_aunque_cambien_las_cuotas():
     assert (resultado.confirmados, resultado.revisar) == (1, [])
 
 
+def test_un_cargo_por_pago_de_dividendos_no_se_explica():
+    # El dividendo ya se abonó; el cargo es su pago al cliente y queda como caja.
+    c = _cartola([("FONDO A", 100)], [])
+    c.movimientos_caja = [MovimientoCaja(CIERRE, "0", "PAGO DE DIVIDENDOS", "CLP", D(250), D(0))]
+    resultado = ec.conciliar([c], CATALOGO, TABLA)
+    assert (resultado.confirmados, resultado.asignados, resultado.dudosos) == (0, 0, [])
+    assert c.movimientos_caja[0].instrumento == ""
+
+
+def test_encuentra_el_fondo_aunque_el_guion_vaya_en_otro_lugar():
+    # El catálogo dice CFI-CCCE y DataFondos publica el mismo fondo como CFICCC-E.
+    catalogo = Catalogo([Instrumento("FONDO C", "CFI-CCCE", "USD", "AGF", "CFI", "CUSTODIA_ACCIONES")])
+    tabla = ec.Tabla(
+        [ec.Evento("3", "CFICCC-E", ec.REPARTO, "USD", D("0.003859215"), date(2026, 9, 1), date(2026, 9, 7))]
+    )
+    c = _cartola([("FONDO C", 29500)], [("REPARTO DE DINERO EN USD", "113.85", date(2026, 9, 7), "")])
+    c.posiciones[0].moneda = "USD"
+    resultado = ec.conciliar([c], catalogo, tabla)
+    assert c.movimientos_caja[0].instrumento == "CFI-CCCE"
+    assert resultado.asignados == 1 and resultado.pendientes == set()
+
+
 def test_sin_tabla_no_cambia_nada():
     c = _cartola([("FONDO A", 100)], [("DIVIDENDO EN PESOS", 250, CIERRE, "")])
     resultado = ec.conciliar([c], CATALOGO, ec.Tabla([]))
