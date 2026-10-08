@@ -5,7 +5,9 @@ del mismo día y deja un reporte con lo que no coincide.
 
 Solo se comparan los clientes que están en la salida (el export trae todos los
 clientes del asesor) y, en los movimientos, solo los de las fechas de proceso
-del export (el export es diario; la cartola trae el mes completo).
+del export (el export es diario; la cartola trae el mes completo). La carpeta
+del export puede traer varios días: se juntan, y de los movimientos se comparan
+solo los días dentro del período de la salida.
 """
 
 import argparse
@@ -127,20 +129,20 @@ def _mostrar(fila: dict, claves: tuple[str, ...]) -> str:
     return " / ".join(fila[c] for c in claves)
 
 
-def _archivos(carpeta: Path, codigo: str | None) -> dict[str, tuple[Path, str]]:
-    """(archivo, código del juego) de cada tipo en la carpeta; con ``codigo``,
-    solo los de ese juego."""
-    encontrados: dict[str, list[tuple[Path, str]]] = defaultdict(list)
+def _archivos(carpeta: Path, codigo: str | None) -> dict[str, tuple[list[Path], str]]:
+    """(archivos de todos los días, código del juego) de cada tipo en la
+    carpeta; con ``codigo``, solo los de ese juego."""
+    encontrados: dict[str, dict[str, list[Path]]] = defaultdict(lambda: defaultdict(list))
     for ruta in sorted(carpeta.glob("*_V2.csv")):
         for tipo in ARCHIVOS:
             m = re.fullmatch(rf"{tipo}_(.+)_\d{{8}}_V2\.csv", ruta.name)
             if m and (codigo is None or m.group(1) == codigo):
-                encontrados[tipo].append((ruta, m.group(1)))
-    repetidos = {t: r for t, r in encontrados.items() if len(r) > 1}
+                encontrados[tipo][m.group(1)].append(ruta)
+    repetidos = {t: sorted(c) for t, c in encontrados.items() if len(c) > 1}
     if repetidos:
-        nombres = ", ".join(p.name for r in repetidos.values() for p, _ in r)
-        raise SystemExit(f"Hay más de un juego de archivos en {carpeta} ({nombres}): indica --codigo")
-    return {t: r[0] for t, r in encontrados.items()}
+        juegos = ", ".join(sorted({c for cs in repetidos.values() for c in cs}))
+        raise SystemExit(f"Hay más de un juego de archivos en {carpeta} ({juegos}): indica --codigo")
+    return {t: next(iter(c.items()))[::-1] for t, c in encontrados.items()}
 
 
 def reporte(comparaciones: list[Comparacion], export: Path, salida: Path) -> str:
@@ -199,16 +201,25 @@ def main(argv: list[str] | None = None) -> int:
     de_salida = _archivos(salida, codigo)
     ignorar = {c.strip() for c in args.ignorar.split(",") if c.strip()}
 
+    def todos(archivo: Archivo, rutas: list[Path]) -> list[dict[str, str]]:
+        return [f for r in rutas for f in leer(archivo, r)]
+
     filas = {
-        tipo: (leer(archivo, del_export[tipo][0]), leer(archivo, de_salida[tipo][0]))
+        tipo: (todos(archivo, del_export[tipo][0]), todos(archivo, de_salida[tipo][0]))
         for tipo, archivo in ARCHIVOS.items()
         if tipo in del_export and tipo in de_salida
     }
-    # El export es de un día: los movimientos de la salida se comparan solo en
-    # esa fecha, y los saldos, en ese cierre o el que se indique.
+    # El export es diario: los movimientos se comparan en los días del export
+    # que caen dentro del período de la salida, y los saldos, en esos días o en
+    # el cierre que se indique.
+    periodo = [f["FechaProceso"] for _, s in filas.values() for f in s]
+    desde, hasta = (min(periodo), max(periodo)) if periodo else ("", "")
     fechas = {f["FechaProceso"] for e, _ in filas.values() for f in e}
     for tipo, (e, s) in filas.items():
-        if tipo in _MOVIMIENTOS or not args.fecha_saldos:
+        if tipo in _MOVIMIENTOS:
+            e = [f for f in e if desde <= f["FechaProceso"] <= hasta]
+            filas[tipo] = (e, [f for f in s if f["FechaProceso"] in fechas])
+        elif not args.fecha_saldos:
             filas[tipo] = (e, [f for f in s if f["FechaProceso"] in fechas])
         else:
             filas[tipo] = (e, [f for f in s if f["FechaProceso"] == args.fecha_saldos])

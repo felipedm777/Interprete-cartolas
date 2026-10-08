@@ -40,4 +40,4 @@ Para comparar la salida con un export de BICE del mismo día, fila por fila:
 python -m cartolas.comparar "<carpeta del export>" "<carpeta de salida>"
 ```
 
-Compara solo los clientes que están en la salida y, en los movimientos, solo la fecha del export. Si el export no es del día de cierre de las cartolas, `--fecha-saldos AAAA-MM-DD` indica qué saldos de la salida comparar. Deja `COMPARACION_<código>.md` en la carpeta de salida.
+Compara solo los clientes que están en la salida y, en los movimientos, solo las fechas del export. La carpeta del export puede traer los archivos de varios días: se juntan, y de los movimientos se comparan los días dentro del período de las cartolas. Si el export no es del día de cierre de las cartolas, `--fecha-saldos AAAA-MM-DD` indica qué saldos de la salida comparar. Deja `COMPARACION_<código>.md` en la carpeta de salida.

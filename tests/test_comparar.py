@@ -94,3 +94,31 @@ def test_saldos_de_otro_cierre(tmp_path):
     assert main(argumentos + ["--fecha-saldos", "2026-09-30"]) == 0
     # Sin indicar el cierre, no hay saldos de la salida en la fecha del export.
     assert main(argumentos) == 1
+
+
+def test_export_de_varios_dias(tmp_path):
+    export = tmp_path / "export"
+    _escribir(
+        export,
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000")],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-30")],
+    )
+    # Otros días del export: uno dentro del período de la cartola y otro después del cierre.
+    for fecha in ("2026-09-12", "2026-10-01"):
+        escribir(
+            MOVIMIENTOS_BOLSA,
+            [_compra("1-9", "ACCION Y", fecha)],
+            export / MOVIMIENTOS_BOLSA.nombre_archivo("10038", fecha),
+        )
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000")],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-30"), _compra("1-9", "ACCION Y", "2026-09-12")],
+    )
+    reporte = tmp_path / "r.md"
+    assert main([str(export), str(tmp_path / "salida"), "--reporte", str(reporte)]) == 0
+    assert "| MOVIMIENTOS_BOLSA | 2 | 2 | 2 | 0 | 0 | ninguna |" in reporte.read_text(encoding="utf-8")
