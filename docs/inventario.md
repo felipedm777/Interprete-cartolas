@@ -58,6 +58,7 @@ Estas columnas del formato de salida no salen de ningún PDF, o solo de algunos:
 | `TipoAPV`, régimen | BICE nueva los codifica en el sufijo del portafolio; BICE antigua, en la columna de cuenta; Sura usa sus propios códigos (`CVN_A`, `BON_F`, `18Q`, `18T`…); Security no los trae | Regla por institución, a confirmar |
 | `TipoCambioUSD` | No viene en BICE antigua; en Sura solo si hay instrumentos en USD | Usar el dólar observado del cierre o el de la cartola Security del mismo mes |
 | `TipoCambioEUR`, `EnTransito` | No vienen en ningún formato | `EnTransito = NO` y `TipoCambioEUR` vacío, salvo que Felipe prefiera otra cosa |
+| Instrumento de los dividendos y repartos | BICE nueva y Sura abonan el dividendo o el reparto en la caja sin decir de qué fondo viene; el export sí lo trae | Comparar el monto por cuota entre clientes del mismo día y contra los repartos que publica DataFondos: [eventos-capital.md](eventos-capital.md) |
 
 ## Preguntas para Felipe
 

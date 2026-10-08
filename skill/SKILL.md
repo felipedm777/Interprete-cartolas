@@ -12,7 +12,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 Desde la carpeta de esta skill (la que contiene `cartolas/`; en el repositorio, `skill/`), con Python y `pymupdf`:
 
 ```
-python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109]
+python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109] [--eventos-capital <tabla.csv>]
 ```
 
 - Escribe un juego de 7 archivos por institución: `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING`. Los de BICE se llaman `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv` y los de otras instituciones `<ARCHIVO>_<INSTITUCIÓN>_<AAAAMMDD>_V2.csv` (p. ej. `SALDOS_CAJA_SECURITY_20260430_V2.csv`). Además deja un `REPORTE_<juegos>_<AAAAMMDD>.md`.
@@ -21,6 +21,7 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 - Si una cartola no trae tipo de cambio (BICE antigua, Pershing, Sura sin filas en USD), se usa el de otra con el mismo cierre, de preferencia del mismo PDF, y queda anotado en el reporte.
 - Las cartolas BICE no traen el tipo de cambio del euro, que el export pone en todos los saldos: se toma de otra cartola con el mismo cierre (Security y Larrainvial lo traen) o de `--tipo-cambio-eur`, que vale para las cartolas del último cierre.
 - Los dividendos y repartos de la cartola BICE nueva no dicen de qué instrumento son: si el monto por cuota cuadra con el de otro cliente el mismo día, o si la cuenta tiene una sola posición que pueda pagarlos, van con el nemotécnico y producto de ese instrumento, como en el export. Conviene correr juntas todas las cartolas del mes.
+- Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban además contra los repartos que publica DataFondos, en `datos/eventos_capital.csv`: eso identifica el fondo de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que la tabla no explica queda como caja y se informa en el reporte, nunca con un fondo supuesto. `--eventos-capital <archivo.csv>` usa otra tabla y `--eventos-capital no` no usa ninguna. Ver "Mantener la tabla de eventos de capital" y `docs/eventos-capital.md`.
 - Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
 - `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
@@ -34,8 +35,19 @@ Si hay un export de BICE del mismo día (o los exports diarios del mes), `python
 1. `extractores.detectar` identifica por el contenido, no por el nombre del archivo, qué cartolas trae el PDF y en qué páginas.
 2. El extractor lee los textos con coordenadas (`pdf.py`), arma las tablas por los encabezados y devuelve una `Cartola` (`modelo.py`) con cuentas, caja, posiciones, movimientos y los totales impresos.
 3. Cada extractor deja sus cuadraturas contra los totales impresos, y `validar.py` agrega las comunes: cantidad × precio en cada posición y movimiento, y las sumas por cuenta y sección cuando la cartola las trae.
-4. `salida.py` completa con la tabla maestra (`catalogo.py`, `datos/instrumentos.csv` y `datos/alias.csv`) el nemotécnico, emisor, producto y archivo de cada instrumento, y con el número de cuenta el producto base, el tipo de APV y el régimen (las cartolas que no son de BICE los traen en la cuenta).
-5. `exportar.py` escribe los CSV con el formato exacto del export (`formato.py`, `docs/formato-salida.md`).
+4. `dividendos.py` y `eventos_capital.py` completan de qué instrumento es cada dividendo o reparto que la cartola no identifica: el primero comparando el monto por cuota entre clientes, el segundo contra los repartos que publica DataFondos.
+5. `salida.py` completa con la tabla maestra (`catalogo.py`, `datos/instrumentos.csv` y `datos/alias.csv`) el nemotécnico, emisor, producto y archivo de cada instrumento, y con el número de cuenta el producto base, el tipo de APV y el régimen (las cartolas que no son de BICE los traen en la cuenta).
+6. `exportar.py` escribe los CSV con el formato exacto del export (`formato.py`, `docs/formato-salida.md`).
+
+## Mantener la tabla de eventos de capital
+
+`datos/eventos_capital.csv` tiene los dividendos y repartos que publica DataFondos, por fondo y serie. Para ampliarla, el reporte de cada corrida lista en "Eventos de capital" los fondos y meses que le faltan. Con el MCP de DataFondos: `resumen_dividendos` dice qué fondos hay y hasta cuándo, `dividendos` (con `rut` y `nemo`) trae el detalle de uno, y cada respuesta se guarda en un archivo JSON y se agrega con
+
+```
+python -m cartolas.eventos_capital <respuesta.json>... [--desde AAAA-MM-DD]
+```
+
+Solo guarda datos públicos de fondos. A DataFondos se le consultan fondos, nunca datos de clientes. El detalle de las reglas está en `docs/eventos-capital.md`.
 
 ## Mantener la tabla maestra
 
