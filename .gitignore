@@ -6,6 +6,8 @@ anonimizado/
 clientes.csv
 otros_datos.csv
 mapeo_anonimizacion.csv
+mapeo_cartolas_sftp.csv
+clientes_cartolas_sftp.csv
 reporte_anonimizacion.txt
 claves.txt
 progreso.txt

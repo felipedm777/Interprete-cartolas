@@ -1,0 +1,4 @@
+# Lectura de PDF con coordenadas (enfoque recomendado en docs/inventario.md)
+pymupdf>=1.23
+# Pruebas
+pytest>=8

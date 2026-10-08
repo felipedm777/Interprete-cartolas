@@ -1,0 +1,146 @@
+"""Comparación de la salida con un export, sobre archivos inventados."""
+
+from decimal import Decimal as D
+
+from cartolas.comparar import main
+from cartolas.exportar import escribir
+from cartolas.formato import CUSTODIA_ACCIONES, MOVIMIENTOS_BOLSA, SALDOS_CAJA
+
+
+def _caja(rut, cuenta, moneda, monto, fecha="2026-09-30"):
+    return {
+        "FechaProceso": fecha,
+        "RutCliente": rut,
+        "Cuenta": cuenta,
+        "Producto": "CUENTAS CAJA",
+        "MonedaValoracionPatrimonio": moneda,
+        "PatrimonioEnMonedaValoracion": D(monto),
+    }
+
+
+def _accion(rut, nombre, cantidad, fecha="2026-09-30"):
+    return {
+        "FechaProceso": fecha,
+        "RutCliente": rut,
+        "Cuenta": "0",
+        "Instrumento": nombre,
+        "Cantidad": D(cantidad),
+        "TipoCambioUSD": D("950.123456789"),
+    }
+
+
+def _compra(rut, nombre, fecha):
+    return {
+        "FechaProceso": fecha,
+        "RutCliente": rut,
+        "Cuenta": "0",
+        "Instrumento": nombre,
+        "NombreTipoMovimiento": "COMPRA RV",
+        "Cantidad": D(10),
+    }
+
+
+def _escribir(carpeta, fecha, caja, acciones, compras):
+    carpeta.mkdir()
+    for archivo, filas in ((SALDOS_CAJA, caja), (CUSTODIA_ACCIONES, acciones), (MOVIMIENTOS_BOLSA, compras)):
+        escribir(archivo, filas, carpeta / archivo.nombre_archivo("10038", fecha))
+
+
+def test_coincide(tmp_path):
+    filas = ([_caja("1-9", "0", "CLP", "1000")], [_accion("1-9", "ACCION X", "5")], [])
+    _escribir(tmp_path / "export", "2026-09-30", *filas)
+    _escribir(tmp_path / "salida", "2026-09-30", *filas)
+    assert main([str(tmp_path / "export"), str(tmp_path / "salida")]) == 0
+    assert (tmp_path / "salida" / "COMPARACION_10038.md").exists()
+
+
+def test_diferencias(tmp_path):
+    _escribir(
+        tmp_path / "export",
+        "2026-09-30",
+        # Otro cliente del asesor que no está en la salida: no cuenta.
+        [_caja("1-9", "0", "CLP", "1000"), _caja("1-9", "0", "USD", "3"), _caja("2-7", "0", "CLP", "5")],
+        [_accion("1-9", "ACCION  X", "5"), _accion("1-9", "ACCION Y", "7")],
+        [_compra("1-9", "ACCION Y", "2026-09-30")],
+    )
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000.0000004")],  # dentro de la tolerancia
+        [_accion("1-9", "Accion X", "6"), _accion("1-9", "ACCION Z", "1")],
+        # Del mes completo: solo cuenta la fecha del export.
+        [_compra("1-9", "ACCION Y", "2026-09-30"), _compra("1-9", "ACCION Y", "2026-09-12")],
+    )
+    reporte = tmp_path / "r.md"
+    assert main([str(tmp_path / "export"), str(tmp_path / "salida"), "--reporte", str(reporte)]) == 1
+    texto = reporte.read_text(encoding="utf-8")
+    assert "| SALDOS_CAJA | 2 | 1 | 1 | 1 | 0 | ninguna |" in texto
+    assert "| CUSTODIA_ACCIONES | 2 | 2 | 1 | 1 | 1 | Cantidad (1) |" in texto
+    assert "| MOVIMIENTOS_BOLSA | 1 | 1 | 1 | 0 | 0 | ninguna |" in texto
+    assert "1-9 / 0 / Accion X: '6,000000' ≠ '5,000000'" in texto
+    assert "2-7" not in texto
+
+
+def test_saldos_de_otro_cierre(tmp_path):
+    _escribir(tmp_path / "export", "2026-09-22", [_caja("1-9", "0", "CLP", "1000", "2026-09-22")], [], [])
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000"), _caja("1-9", "0", "CLP", "900", "2026-08-31")],
+        [],
+        [],
+    )
+    argumentos = [str(tmp_path / "export"), str(tmp_path / "salida"), "--reporte", str(tmp_path / "r.md")]
+    assert main(argumentos + ["--fecha-saldos", "2026-09-30"]) == 0
+    # Sin indicar el cierre, no hay saldos de la salida en la fecha del export.
+    assert main(argumentos) == 1
+
+
+def test_export_de_varios_dias(tmp_path):
+    export = tmp_path / "export"
+    _escribir(
+        export,
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000")],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-30")],
+    )
+    # Otros días del export: uno dentro del período de la cartola y otro después del cierre.
+    for fecha in ("2026-09-12", "2026-10-01"):
+        escribir(
+            MOVIMIENTOS_BOLSA,
+            [_compra("1-9", "ACCION Y", fecha)],
+            export / MOVIMIENTOS_BOLSA.nombre_archivo("10038", fecha),
+        )
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [_caja("1-9", "0", "CLP", "1000")],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-30"), _compra("1-9", "ACCION Y", "2026-09-12")],
+    )
+    reporte = tmp_path / "r.md"
+    assert main([str(export), str(tmp_path / "salida"), "--reporte", str(reporte)]) == 0
+    assert "| MOVIMIENTOS_BOLSA | 2 | 2 | 2 | 0 | 0 | ninguna |" in reporte.read_text(encoding="utf-8")
+
+
+def test_empareja_primero_las_filas_mas_parecidas(tmp_path):
+    """Una fila de la salida sin par no le quita el suyo a otra con la misma clave."""
+    _escribir(tmp_path / "export", "2026-09-30", [], [], [_compra("1-9", "ACCION Y", "2026-09-30")])
+    # La compra del 12-09 sin par va primero; antes se quedaba con la del 30-09.
+    _escribir(
+        tmp_path / "salida",
+        "2026-09-30",
+        [],
+        [],
+        [_compra("1-9", "ACCION Y", "2026-09-12"), _compra("1-9", "ACCION Y", "2026-09-30")],
+    )
+    escribir(
+        MOVIMIENTOS_BOLSA,
+        [_compra("1-9", "OTRA", "2026-09-12")],
+        tmp_path / "export" / MOVIMIENTOS_BOLSA.nombre_archivo("10038", "2026-09-12"),
+    )
+    reporte = tmp_path / "r.md"
+    main([str(tmp_path / "export"), str(tmp_path / "salida"), "--reporte", str(reporte)])
+    texto = reporte.read_text(encoding="utf-8")
+    assert "| MOVIMIENTOS_BOLSA | 2 | 2 | 1 | 1 | 1 | ninguna |" in texto
