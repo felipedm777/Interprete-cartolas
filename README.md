@@ -41,3 +41,18 @@ python -m cartolas.comparar "<carpeta del export>" "<carpeta de salida>"
 ```
 
 Compara solo los clientes que están en la salida y, en los movimientos, solo las fechas del export. La carpeta del export puede traer los archivos de varios días: se juntan, y de los movimientos se comparan los días dentro del período de las cartolas. Si el export no es del día de cierre de las cartolas, `--fecha-saldos AAAA-MM-DD` indica qué saldos de la salida comparar. Deja `COMPARACION_<código>.md` en la carpeta de salida.
+
+## Instalar la skill en Claude Code
+
+Conviene instalarla en el computador donde están las cartolas: Claude Code la corre ahí y los datos no salen de ese equipo. Necesita Python 3.10 o superior.
+
+1. Bajar el repositorio: `git clone https://github.com/felipedm777/Interprete-cartolas.git`, o el ZIP desde GitHub (botón *Code* → *Download ZIP*).
+2. Instalar la librería de PDF: `pip install pymupdf`.
+3. Copiar la carpeta `skill` con el nombre `interprete-cartolas` a una de estas carpetas:
+   - `.claude/skills/` dentro de la carpeta donde se trabaja con las cartolas, para usarla solo ahí.
+   - `~/.claude/skills/` (en Windows, `C:\Users\<usuario>\.claude\skills\`), para usarla en cualquier carpeta.
+
+   Tiene que quedar `.../skills/interprete-cartolas/SKILL.md` junto a `.../skills/interprete-cartolas/cartolas/`.
+4. Abrir Claude Code en la carpeta de las cartolas y pedirle, por ejemplo, "exporta las cartolas de esta carpeta al formato del SFTP". Claude encuentra la skill por la descripción de su `SKILL.md`.
+
+Para actualizarla, bajar de nuevo el repositorio (`git pull`) y volver a copiar la carpeta `skill`. La tabla maestra de instrumentos (`cartolas/datos/instrumentos.csv`) viene incluida; para agregarle instrumentos nuevos, ver "Mantener la tabla maestra" en `skill/SKILL.md`.
