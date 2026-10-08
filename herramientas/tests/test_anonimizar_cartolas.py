@@ -45,6 +45,7 @@ def carpeta(tmp_path):
         <h2>Banco Uno S.A. RUT {rut(RUT_BANCO)}</h2>
         <p><b>Cliente:</b> JUAN ANDRÉS PÉREZ GONZÁLEZ &nbsp; <b>RUT:</b> {rut(RUT_PERSONA)}</p>
         <p>Señor(a): PÉREZ GONZÁLEZ, JUAN ANDRÉS<br>Av. Apoquindo 1234, Las Condes</p>
+        <p>Dirección: Los Aromos 456, Providencia<br>Email: jperez@gmail.com<br>Teléfono: +56 9 8765 4321</p>
         <p>Estimado Sr. Pérez, adjuntamos su cartola del período.</p>
         <table><tr><td>03/09/2026</td><td>Transferencia de Juan Pérez</td><td>250.000</td></tr>
         <tr><td>05/09/2026</td><td>Pago tarjeta</td><td>100.000</td></tr></table>""")
@@ -55,6 +56,7 @@ def carpeta(tmp_path):
     p.insert_text((50, 90), f"Titular: INVERSIONES LOS ROBLES SPA  R.U.T. {RUT_EMPRESA}-{A.digito_verificador(RUT_EMPRESA)}", fontsize=10)
     p.insert_text((50, 105), f"Apoderado: Juan Andrés Pérez González  RUT {rut(RUT_PERSONA)}", fontsize=10)
     p.insert_text((50, 130), "CFIMRCLP   1.000   12.345   12.345.000", fontsize=10, fontname="cour")
+    p.insert_text((50, 145), "Número de Cuenta: 1AB-123456", fontsize=10)
     p.insert_text((30, 700), f"Folio cliente {rut(RUT_PERSONA)}", fontsize=8, rotate=90)
     rotada = doc.new_page()
     rotada.insert_text((50, 60), "Cliente JUAN PEREZ GONZALEZ", fontsize=10)
@@ -92,9 +94,13 @@ def correr(carpeta):
     return resultado.stdout
 
 
-def leer_clientes_csv(carpeta):
-    with open(carpeta / "clientes.csv", encoding="utf-8-sig") as f:
+def leer_csv(ruta):
+    with open(ruta, encoding="utf-8-sig") as f:
         return list(csv.DictReader(f, delimiter=";"))
+
+
+def leer_clientes_csv(carpeta):
+    return leer_csv(carpeta / "clientes.csv")
 
 
 def texto_pdf(ruta):
@@ -121,12 +127,25 @@ def test_primera_pasada_propone_clientes(carpeta):
     assert filas[rut(RUT_BANCO)]["anonimizar"] == "no"  # el banco no es cliente
 
 
-def test_segunda_pasada_anonimiza_y_verifica(carpeta):
+def test_segunda_pasada_propone_otros_datos(carpeta):
     correr(carpeta)
     # El PDF con clave se abrió con el RUT del cliente encontrado en otro archivo.
     filas = {f["rut"]: f for f in leer_clientes_csv(carpeta)}
     assert filas[rut(RUT_EMPRESA)]["nombre"] == "INVERSIONES LOS ROBLES SPA"
 
+    correr(carpeta)
+    assert not (carpeta / "anonimizado").exists()
+    otros = {(f["tipo"], f["valor"]) for f in leer_csv(carpeta / "otros_datos.csv")}
+    assert ("direccion", "Los Aromos 456, Providencia") in otros
+    assert ("email", "jperez@gmail.com") in otros
+    assert ("telefono", "+56 9 8765 4321") in otros
+    assert ("cuenta", "1AB-123456") in otros and ("cuenta", "1AB123456") in otros
+    assert not any(v.endswith("@bice.cl") for _, v in otros)  # correos de instituciones no
+
+
+def test_tercera_pasada_anonimiza_y_verifica(carpeta):
+    correr(carpeta)
+    correr(carpeta)
     correr(carpeta)
     salida = carpeta / "anonimizado"
     pdfs = sorted(salida.rglob("*.pdf"))
@@ -140,6 +159,8 @@ def test_segunda_pasada_anonimiza_y_verifica(carpeta):
         assert "PEREZ" not in texto and "GONZALEZ" not in texto and "ROBLES" not in texto
         assert "12345678" not in texto.replace(".", "")
         assert "76123456" not in texto.replace(".", "")
+        assert "AROMOS" not in texto and "JPEREZ" not in texto and "8765 4321" not in texto
+        assert "1AB-123456" not in texto
     banco = texto_pdf(next(p for p in pdfs if "Banco Uno" in str(p)))
     assert "APOQUINDO 1234" in banco  # el resto del texto queda intacto
     assert rut(RUT_BANCO) in banco  # el RUT del banco no se toca
@@ -160,9 +181,9 @@ def test_segunda_pasada_anonimiza_y_verifica(carpeta):
     assert "PEREZ" not in A.normalizar(resumen) and "12345678" not in resumen
 
     # Correr de nuevo usa los mismos datos falsos.
-    antes = (carpeta / "mapeo_anonimizacion.csv").read_text(encoding="utf-8-sig")
+    antes = [(carpeta / f).read_text(encoding="utf-8-sig") for f in ("mapeo_anonimizacion.csv", "otros_datos.csv")]
     correr(carpeta)
-    assert (carpeta / "mapeo_anonimizacion.csv").read_text(encoding="utf-8-sig") == antes
+    assert [(carpeta / f).read_text(encoding="utf-8-sig") for f in ("mapeo_anonimizacion.csv", "otros_datos.csv")] == antes
 
 
 def test_reemplazo_en_texto_mantiene_estilo():

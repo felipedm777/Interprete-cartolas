@@ -9,14 +9,21 @@ Uso (en la carpeta "Interprete Cartolas", donde están "Training Data" y "Exampl
    cada RUT y el nombre que aparece junto a él. Ábrelo en Excel, corrige los
    nombres y pon "no" en la columna "anonimizar" para los RUT que no son de
    clientes (por ejemplo, el RUT del banco).
-2. La segunda vez escribe las copias anonimizadas en la carpeta "anonimizado",
-   verifica que no quede ningún nombre ni RUT real y deja un resumen.
+   Si después aparecen RUT nuevos (otra cartola, la carpeta Example), se agregan
+   al final de "clientes.csv" y el script se detiene para que los revises.
+2. Luego busca los demás datos de cada cliente (dirección, comuna, email,
+   teléfono y número de cuenta) y crea "otros_datos.csv". Revísalo: pon "no" en
+   lo que no sea del cliente, agrega lo que falte y, si un nombre de archivo
+   trae una abreviatura del cliente (iniciales, un nombre mal escrito), agrégala
+   como tipo "alias". La columna "falso" se llena sola la primera vez.
+3. La siguiente vez escribe las copias anonimizadas en la carpeta "anonimizado",
+   verifica que no quede ningún dato real y deja un resumen.
 
-Los originales nunca se modifican. "clientes.csv", "mapeo_anonimizacion.csv" y
-"reporte_anonimizacion.txt" tienen datos reales: quedan solo en este computador,
-fuera de "anonimizado", y no deben subirse a ningún lado. Un archivo que no pasa
-la verificación no se copia a "anonimizado", así que esa carpeta se puede
-compartir completa.
+Los originales nunca se modifican. "clientes.csv", "otros_datos.csv",
+"mapeo_anonimizacion.csv" y "reporte_anonimizacion.txt" tienen datos reales:
+quedan solo en este computador, fuera de "anonimizado", y no deben subirse a
+ningún lado. Un archivo que no pasa la verificación no se copia a "anonimizado",
+así que esa carpeta se puede compartir completa.
 """
 
 import argparse
@@ -26,6 +33,7 @@ import re
 import shutil
 import sys
 import unicodedata
+from collections import Counter
 from pathlib import Path
 
 try:
@@ -50,6 +58,7 @@ ARCHIVO_MAPEO = "mapeo_anonimizacion.csv"
 ARCHIVO_REPORTE = "reporte_anonimizacion.txt"
 ARCHIVO_RESUMEN = "RESUMEN.txt"
 ARCHIVO_CLAVES = "claves.txt"  # opcional: una clave de PDF por línea
+ARCHIVO_OTROS = "otros_datos.csv"
 
 EXT_PDF = {".pdf"}
 EXT_EXCEL = {".xlsx", ".xlsm"}
@@ -84,17 +93,29 @@ SUFIJOS_EMPRESA = {
 }
 
 # Dos listas para que los nombres de pila falsos de una persona no mezclen géneros.
+# Sin tildes ni eñes: se escriben con la fuente Helvetica del PDF.
 NOMBRES_FALSOS = [
     [
         "Ana", "Eva", "Luz", "Ines", "Rosa", "Sara", "Elena", "Paula", "Laura",
         "Marta", "Julia", "Clara", "Sofia", "Lucia", "Andrea", "Camila", "Daniela",
         "Valeria", "Carolina", "Fernanda", "Gabriela", "Francisca", "Constanza",
+        "Ada", "Ema", "Alba", "Nora", "Olga", "Irene", "Pilar", "Rocio", "Belen",
+        "Silvia", "Teresa", "Lorena", "Paola", "Karina", "Romina", "Cecilia",
+        "Natalia", "Viviana", "Pamela", "Monica", "Beatriz", "Antonia", "Josefa",
+        "Javiera", "Isidora", "Catalina", "Macarena", "Veronica", "Margarita",
+        "Agustina", "Victoria",
     ],
     [
         "Ivo", "Leo", "Luis", "Raul", "Saul", "Hugo", "Ivan", "Pablo", "Pedro",
         "Mario", "Jorge", "Diego", "Tomas", "Andres", "Carlos", "Felipe", "Matias",
         "Rodrigo", "Gonzalo", "Ignacio", "Eduardo", "Cristian", "Sebastian",
         "Francisco", "Maximiliano",
+        "Eloy", "Joel", "Noel", "Ruben", "Simon", "Julio", "Oscar", "Ramon",
+        "Lucas", "Mateo", "Marcos", "Daniel", "Manuel", "Samuel", "Emilio",
+        "Arturo", "Hernan", "Claudio", "Fabian", "Renato", "Ricardo", "Esteban",
+        "Joaquin", "Vicente", "Nicolas", "Marcelo", "Mauricio", "Ernesto",
+        "Alfredo", "Rolando", "Osvaldo", "Bastian", "Leonardo", "Guillermo",
+        "Humberto", "Cristobal", "Benedicto", "Valentin",
     ],
 ]
 
@@ -105,6 +126,15 @@ APELLIDOS_FALSOS = [
     "Figueroa", "Sepulveda", "Valenzuela", "Riquelme", "Saavedra", "Alvarado",
     "Contreras", "Hernandez", "Villalobos", "Valderrama", "Montenegro",
     "Santibanez", "Echeverria",
+    "Mora", "Jara", "Vega", "Diaz", "Lillo", "Moya", "Rojas", "Araya", "Pena",
+    "Lobos", "Mella", "Ramos", "Godoy", "Palma", "Ulloa", "Leiva", "Campos",
+    "Castro", "Vargas", "Nunez", "Torres", "Flores", "Medina", "Bustos",
+    "Ibarra", "Quiroz", "Toledo", "Galvez", "Valdes", "Guzman", "Yanez",
+    "Morales", "Herrera", "Cortes", "Navarro", "Caceres", "Vasquez", "Pizarro",
+    "Escobar", "Zuniga", "Miranda", "Donoso", "Aravena", "Paredes", "Poblete",
+    "Venegas", "Jorquera", "Olivares", "Gallardo", "Orellana", "Sandoval",
+    "Castillo", "Espinoza", "Gutierrez", "Cardenas", "Sanhueza", "Cifuentes",
+    "Arancibia", "Bustamante", "Rebolledo",
 ]
 
 # Si el nombre junto a un RUT tiene alguna de estas palabras, probablemente es
@@ -116,8 +146,57 @@ PALABRAS_INSTITUCION = {
 
 PALABRAS_EMPRESA_FALSAS = [
     "Alerce", "Coigue", "Quillay", "Peumo", "Boldo", "Maiten", "Litre",
-    "Arrayan", "Canelo", "Lenga", "Raulí", "Ulmo", "Tepa", "Luma",
+    "Arrayan", "Canelo", "Lenga", "Rauli", "Ulmo", "Tepa", "Luma",
+    "Notro", "Molle", "Radal", "Tineo", "Roble", "Chilco", "Pehuen", "Laurel",
+    "Espino", "Queule", "Belloto", "Patagua", "Copihue", "Quintral", "Avellano",
+    "Guayacan", "Tamarugo", "Algarrobo",
 ]
+
+# Palabras de una dirección que se dejan igual (tipo de vía, conectores, unidad).
+PALABRAS_DIRECCION = {
+    "CALLE", "AVENIDA", "AVDA", "AV", "PASAJE", "PJE", "PSJE", "PAS", "CAMINO",
+    "CASA", "DEPTO", "DPTO", "DEPARTAMENTO", "DP", "OFICINA", "OF", "PISO", "P",
+    "BLOCK", "TORRE", "PARCELA", "LOTE", "SITIO", "MANZANA", "VILLA", "SAN",
+    "SANTA", "A", "B", "C", "D", "CHILE",
+} | CONECTORES
+
+CALLES_FALSAS = [
+    "Olmos", "Pinos", "Tilos", "Robles", "Sauces", "Cedros", "Lirios", "Aromos",
+    "Alamos", "Ulmos", "Lumas", "Tepas", "Notros", "Boldos", "Peumos",
+    "Litres", "Fresnos", "Acacias", "Encinas", "Nogales", "Perales", "Mimosas",
+    "Dalias", "Retamos", "Camelias", "Naranjos", "Ciruelos", "Duraznos",
+    "Jazmines", "Claveles", "Violetas", "Amapolas", "Gardenias", "Magnolias",
+    "Abedules", "Laureles", "Copihues", "Arrayanes", "Avellanos", "Araucarias",
+    "Hortensias", "Tulipanes", "Limoneros", "Eucaliptos", "Algarrobos",
+]
+
+# Comunas que se reconocen al final de una dirección y las que se usan como reemplazo.
+COMUNAS_CONOCIDAS = [
+    "SAN PEDRO DE LA PAZ", "LO BARNECHEA", "LAS CONDES", "LA REINA", "VITACURA",
+    "PROVIDENCIA", "NUNOA", "SANTIAGO", "CONCEPCION", "CHIGUAYANTE", "TALCAHUANO",
+    "HUALPEN", "COLINA", "SAN VICENTE", "PENALOLEN", "LA FLORIDA", "MAIPU",
+]
+
+COMUNAS_FALSAS = [
+    "Hualqui", "Tome", "Penco", "Lota", "Coronel", "Florida", "Cabrero", "Yumbel",
+    "Arauco", "Quillon", "Coelemu", "Lebu", "Mulchen", "Nacimiento", "Santa Juana",
+    "Macul", "Quilicura", "Pudahuel", "Lampa", "Buin", "Paine", "Talagante",
+    "Melipilla", "Pirque", "Til Til", "Curacavi", "Padre Hurtado", "El Monte",
+]
+
+DOMINIOS_PUBLICOS = {
+    "gmail.com", "hotmail.com", "hotmail.cl", "msn.com", "yahoo.com", "yahoo.es",
+    "outlook.com", "live.cl", "live.com", "icloud.com",
+}
+
+# Correos de las instituciones: no son datos de clientes y no se tocan.
+DOMINIOS_INSTITUCION = {
+    "bice.cl", "biceinversiones.cl", "larrainvial.com", "larrainvial.cl", "sura.cl",
+    "bny.com", "pershing.com", "inversionessecurity.cl", "security.cl",
+}
+
+# Dominios de la asesora: en un correo de cliente se cambia la parte antes de la @.
+DOMINIOS_ASESORA = {"afitrading.com", "afit.cl"}
 
 
 # --------------------------------------------------------------------------
@@ -279,8 +358,14 @@ def asignar_falsos(clientes, mapeo_previo, rng):
             c.rut_falso = candidato
         if len(c.falsos) != len(c.tokens):
             c.falsos = []
-            nombres_falsos = rng.choice(NOMBRES_FALSOS)
+            # nombre de pila terminado en "a" -> nombres falsos femeninos
+            femenino = bool(c.tokens) and c.tokens[0].endswith("A")
+            nombres_falsos = NOMBRES_FALSOS[0] if femenino else NOMBRES_FALSOS[1]
             for i, tok in enumerate(c.tokens):
+                if len(tok) == 1 and not c.es_empresa:
+                    # inicial de un apellido ("Perez Q."): otra letra
+                    c.falsos.append(rng.choice([l for l in "ABCDEFGHIJLMNOPRSTUV" if l != tok]))
+                    continue
                 if c.es_empresa:
                     if tok in SUFIJOS_EMPRESA or tok in CONECTORES:
                         c.falsos.append(c.palabras[i])
@@ -354,6 +439,9 @@ LETRAS_EQUIVALENTES = {
 
 
 LETRA = r"\wÁÉÍÓÚÑáéíóúñ"
+# Como LETRA pero sin "_": en nombres de archivo el guion bajo separa palabras
+# ("1AB123456_MSTAT", "Sura-Agosto-XYZ.pdf").
+ALFANUM = r"0-9A-Za-zÁÉÍÓÚÑÜáéíóúñü"
 
 
 def patron_token(token):
@@ -392,7 +480,12 @@ class Reemplazador:
     def texto_falso(self, original, cliente, seq):
         palabras = [cliente.falsos[i] for i in seq]
         coma = "," in original
-        if coma and len(seq) > 1:
+        pal_orig = original.split()
+        if coma and len(pal_orig) == len(palabras):
+            # la coma queda pegada a la misma palabra: "Asesorias, Inversiones" o "PEREZ, JUAN"
+            palabras = [f + "," if o.endswith(",") else f for o, f in zip(pal_orig, palabras)]
+            falso = " ".join(palabras)
+        elif coma and len(seq) > 1 and cliente.indices_apellidos():
             # "PEREZ GONZALEZ, JUAN": la coma va después de los apellidos.
             n_ap = len([i for i in seq if i in cliente.indices_apellidos()])
             falso = " ".join(palabras[:n_ap]) + ", " + " ".join(palabras[n_ap:])
@@ -420,20 +513,473 @@ class Reemplazador:
             texto = regex.sub(sub_nombre, texto)
         return texto, cambios
 
+    def reemplazar_sueltos(self, texto):
+        """Para nombres de archivo: cambia también una palabra suelta del nombre
+        ("SURA-Agosto-Juan"), con el mismo reemplazo que tiene en el nombre completo."""
+        if not hasattr(self, "_sueltos"):
+            self._sueltos = []
+            for c in self.clientes:
+                for i, tok in enumerate(c.tokens):
+                    if len(tok) >= 3 and tok not in SUFIJOS_EMPRESA and tok not in CONECTORES:
+                        regex = re.compile(aislado(patron_token(tok), ALFANUM), re.IGNORECASE)
+                        self._sueltos.append((len(tok), regex, c.falsos[i]))
+            self._sueltos.sort(key=lambda s: s[0], reverse=True)
+        for _, regex, falso in self._sueltos:
+            texto = regex.sub(lambda m, falso=falso: mismo_estilo(m.group(0), falso), texto)
+        return texto
+
+
+# --------------------------------------------------------------------------
+# Otros datos del cliente: dirección, comuna, email, teléfono, cuenta y alias
+# --------------------------------------------------------------------------
+
+# "codigo": identificador corto del cliente dentro del texto (p. ej. sus iniciales como
+# código de asesor en Pershing). "alias": igual, pero solo en nombres de archivo.
+TIPOS_OTROS = ("direccion", "comuna", "email", "telefono", "cuenta", "codigo", "alias")
+COLUMNAS_OTROS = ["tipo", "valor", "cliente", "anonimizar", "falso", "veces", "carpetas"]
+
+EMAIL_RE = re.compile(r"[\w.%+#*-]+@[\w-]+(?:\.[\w-]+)+")
+CUENTA_RE = re.compile(r"N[uú]mero de Cuenta:?\s*([A-Z0-9]{2,4}-\d{4,})", re.IGNORECASE)
+CODIGO_POSTAL_RE = re.compile(r"^A\d{7}CSF\w*-SD$")  # línea que cierra el bloque de envío (Pershing)
+DIRECCION_MAYUS_RE = re.compile(r"^[A-ZÁÉÍÓÚÑ0-9 .]+\s\d+[A-Z0-9 .]*,\s*[A-ZÁÉÍÓÚÑ ]+$")
+ETIQUETA_RE = re.compile(r"^\s*[^\d:]{2,30}:\s*$")
+SEPARADORES_CUENTA = re.compile(r"[\s\-./]")
+
+
+def etiqueta_cliente(cliente):
+    if cliente is None:
+        return ""
+    if cliente.rut:
+        return f"{cliente.rut:,}".replace(",", ".") + "-" + digito_verificador(cliente.rut)
+    return cliente.nombre
+
+
+def tokens_de(valor):
+    return [t for t in (limpiar_token(p) for p in valor.split()) if t]
+
+
+def iniciales(tokens, indices):
+    return "".join(tokens[i][:1] for i in indices if i < len(tokens) and tokens[i])
+
+
+class OtroDato:
+    def __init__(self, fila):
+        self.fila = fila
+        self.tipo = fila.get("tipo", "").strip().lower()
+        self.valor = fila.get("valor", "").strip()
+        self.cliente_txt = fila.get("cliente", "").strip()
+        self.falso = fila.get("falso", "").strip()
+        self.tokens = tokens_de(self.valor)
+
+
+class OtrosDatos:
+    """Valores literales de cada cliente (otros_datos.csv) y su reemplazo falso."""
+
+    def __init__(self, filas, clientes, rng, palabras_reales=()):
+        self.rng = rng
+        self.por_rut = {c.rut: c for c in clientes if c.rut}
+        self.por_nombre = {normalizar(c.nombre): c for c in clientes if c.nombre}
+        self.usados = {t for c in clientes for t in c.tokens} | set(palabras_reales)
+        self.usados |= {normalizar(f) for c in clientes for f in c.falsos}
+        self.numeros, self.palabras, self.comunas, self.dominios = {}, {}, {}, {}
+        self.todos = [OtroDato(f) for f in filas]
+        self.datos = [d for d in self.todos
+                      if d.tipo in TIPOS_OTROS and d.tokens
+                      and d.fila.get("anonimizar", "si").strip().lower() not in ("no", "n")]
+        self.cuentas = {}
+        for d in self.datos:
+            for t in d.tokens:
+                self.usados.add(t)
+            if d.tipo == "cuenta" and d.falso:
+                self.cuentas[SEPARADORES_CUENTA.sub("", d.valor)] = SEPARADORES_CUENTA.sub("", d.falso)
+        self.generados = 0
+        # primero los valores con separadores, para que sus variantes compactas los reutilicen
+        pendientes = [d for d in self.datos if not d.falso]
+        pendientes.sort(key=lambda d: d.tipo == "cuenta" and not SEPARADORES_CUENTA.search(d.valor))
+        for d in pendientes:
+            d.falso = self.generar(d)
+            d.fila["falso"] = d.falso
+            self.generados += 1
+        self.datos.sort(key=lambda d: len(d.tokens), reverse=True)
+        self.regex_texto = []
+        for d in self.datos:
+            if d.tipo == "comuna":
+                continue  # solo como línea completa en la primera página de un PDF
+            patron = r"[\s,]+".join(patron_token(t) for t in d.tokens)
+            regex = re.compile(aislado(patron, ALFANUM + "@"), re.IGNORECASE)
+            self.regex_texto.append((regex, d))
+
+    # ---- datos falsos ----
+
+    def cliente(self, dato):
+        txt = dato.cliente_txt
+        m = re.match(r"^\s*([\d.]+)\s*-?\s*[\dkK]?\s*$", txt)
+        if m and m.group(1).replace(".", ""):
+            return self.por_rut.get(cuerpo_rut(m.group(1)))
+        return self.por_nombre.get(normalizar(txt))
+
+    def elegir(self, lista, largo):
+        return elegir_parecido(lista, largo, self.usados, self.rng)
+
+    def numero_falso(self, digitos):
+        if digitos not in self.numeros:
+            while True:
+                primero = self.rng.choice("0" if digitos[0] == "0" else "123456789")
+                nuevo = primero + "".join(self.rng.choice("0123456789") for _ in digitos[1:])
+                if nuevo != digitos or len(digitos) == 1:
+                    break
+            self.numeros[digitos] = nuevo
+        return self.numeros[digitos]
+
+    def palabra_falsa(self, palabra):
+        clave = limpiar_token(palabra)
+        if clave not in self.palabras:
+            self.palabras[clave] = self.elegir(CALLES_FALSAS, len(clave))
+        falsa = self.palabras[clave]
+        cola = palabra[len(palabra.rstrip(".,;:")):]
+        return falsa + cola
+
+    def comuna_falsa(self, comuna):
+        clave = normalizar(comuna)
+        if clave not in self.comunas:
+            self.comunas[clave] = self.elegir(COMUNAS_FALSAS, len(clave))
+        return self.comunas[clave]
+
+    def calle_falsa(self, parte):
+        palabras = parte.split()
+        norm = [limpiar_token(p) for p in palabras]
+        comuna = ""
+        for c in sorted(COMUNAS_CONOCIDAS, key=len, reverse=True):
+            n = len(c.split())
+            if len(norm) > n and " ".join(norm[-n:]) == c:
+                comuna = self.comuna_falsa(c)
+                palabras = palabras[:-n]
+                break
+        nuevas = []
+        for p in palabras:
+            t = limpiar_token(p)
+            if not t or t in PALABRAS_DIRECCION:
+                nuevas.append(p)
+            elif re.search(r"\d", p):
+                nuevas.append(re.sub(r"\d+", lambda m: self.numero_falso(m.group(0)), p))
+            else:
+                nuevas.append(self.palabra_falsa(p))
+        return " ".join(nuevas + ([comuna] if comuna else []))
+
+    def direccion_falsa(self, valor):
+        partes = [p.strip() for p in valor.split(",")]
+        nuevas = []
+        for k, parte in enumerate(partes):
+            if k > 0 and parte and not re.search(r"\d", parte):
+                nuevas.append(self.comuna_falsa(parte))  # ", Chiguayante"
+            else:
+                nuevas.append(self.calle_falsa(parte))
+        return ", ".join(nuevas)
+
+    def local_falso(self, local, cliente):
+        digitos = sum(ch.isdigit() for ch in local)
+        sufijo = "".join(self.rng.choice("0123456789") for _ in range(digitos))
+        if cliente and cliente.falsos and not cliente.es_empresa:
+            ap = cliente.indices_apellidos()
+            if normalizar(local) == iniciales(cliente.tokens, [0] + ap):
+                return iniciales([normalizar(f) for f in cliente.falsos], [0] + ap)
+            paterno = cliente.falsos[ap[0]] if ap else cliente.falsos[-1]
+            return (cliente.falsos[0][:1] + paterno).lower() + sufijo
+        if cliente and cliente.falsos:
+            propias = [f for f, t in zip(cliente.falsos, cliente.tokens)
+                       if t not in SUFIJOS_EMPRESA and t not in CONECTORES]
+            return "".join(propias or cliente.falsos).lower() + sufijo
+        return self.elegir(CALLES_FALSAS, len(local)).lower() + sufijo
+
+    def dominio_falso(self, dominio, cliente):
+        if dominio not in self.dominios:
+            base = self.local_falso("", cliente) if cliente else ""
+            base = re.sub(r"[^a-z]", "", base.lower()) or self.elegir(CALLES_FALSAS, 6).lower()
+            tld = dominio.rsplit(".", 1)[-1]
+            nuevo = f"{base}.{tld}"
+            while nuevo in self.dominios.values():
+                nuevo = f"{base}{self.rng.randint(2, 99)}.{tld}"
+            self.dominios[dominio] = nuevo
+        return self.dominios[dominio]
+
+    def email_falso(self, valor, cliente):
+        local, _, dominio = valor.partition("@")
+        prefijo = re.match(r"^[^\w#]*", local).group(0)  # "*" de una nota al pie
+        local = local[len(prefijo):]
+        if "#" in local or "*" in local:
+            # correo que la institución ya enmascaró: x#########@gmail.com
+            falso_local = self.local_falso("x", cliente)[:1] + local[1:]
+        else:
+            falso_local = self.local_falso(local, cliente)
+        falso_local = prefijo + falso_local
+        dom = dominio.lower()
+        if dom in DOMINIOS_PUBLICOS or dom in DOMINIOS_ASESORA:
+            falso_dom = dominio
+        else:
+            falso_dom = self.dominio_falso(dom, cliente)
+        return f"{falso_local}@{falso_dom}"
+
+    def telefono_falso(self, valor):
+        # se conservan el código de país y de área; cambia el número del abonado
+        grupos = list(re.finditer(r"\d+", valor))
+        if not grupos:
+            return valor
+        ultimo = grupos[-1]
+        d = ultimo.group(0)
+        nuevo = d[0] + "".join(self.rng.choice("0123456789") for _ in d[1:])
+        return valor[:ultimo.start()] + nuevo + valor[ultimo.end():]
+
+    def cuenta_falsa(self, valor):
+        # cambia cada grupo de 3 o más dígitos; la variante sin guion ("1AB123456")
+        # usa el mismo número falso que la con guion ("1AB-123456")
+        compacto = SEPARADORES_CUENTA.sub("", valor)
+        if compacto in self.cuentas:
+            digitos = iter(self.cuentas[compacto])
+            return "".join(ch if SEPARADORES_CUENTA.match(ch) else next(digitos) for ch in valor)
+        falso = re.sub(r"\d{3,}", lambda m: self.numero_falso(m.group(0)), valor)
+        self.cuentas[compacto] = SEPARADORES_CUENTA.sub("", falso)
+        return falso
+
+    def alias_falso(self, valor, cliente):
+        if not cliente or not cliente.falsos:
+            return self.elegir(CALLES_FALSAS, len(valor))
+        norm = normalizar(valor)
+        ap = cliente.indices_apellidos()
+        if norm == iniciales(cliente.tokens, [0] + ap):
+            return iniciales([normalizar(f) for f in cliente.falsos], [0] + ap)
+
+        def comun(a, b):
+            n = 0
+            while n < min(len(a), len(b)) and a[n] == b[n]:
+                n += 1
+            return n
+        i = max(range(len(cliente.tokens)), key=lambda k: comun(norm, cliente.tokens[k]))
+        return cliente.falsos[i]
+
+    def generar(self, dato):
+        cliente = self.cliente(dato)
+        if dato.tipo == "direccion":
+            return self.direccion_falsa(dato.valor)
+        if dato.tipo == "comuna":
+            return self.comuna_falsa(dato.valor)
+        if dato.tipo == "email":
+            return self.email_falso(dato.valor, cliente)
+        if dato.tipo == "telefono":
+            return self.telefono_falso(dato.valor)
+        if dato.tipo == "cuenta":
+            return self.cuenta_falsa(dato.valor)
+        return self.alias_falso(dato.valor, cliente)
+
+    # ---- reemplazo ----
+
+    def reemplazar(self, texto, con_alias=False):
+        cambios = 0
+        for regex, d in self.regex_texto:
+            if d.tipo == "alias" and not con_alias:
+                continue
+
+            def sub(m, d=d):
+                nonlocal cambios
+                cambios += 1
+                return mismo_estilo(m.group(0), d.falso)
+            texto = regex.sub(sub, texto)
+        return texto, cambios
+
+    def buscar_en_pagina(self, pagina, es_primera):
+        """Como buscar_nombres: secuencias de palabras de una misma línea."""
+        hallazgos = []
+        for linea in palabras_por_linea(pagina):
+            tokens = [limpiar_token(p) for _, p in linea]
+            ocupado = [False] * len(linea)
+            for d in self.datos:
+                if d.tipo == "alias":
+                    continue
+                n = len(d.tokens)
+                if d.tipo == "comuna":
+                    # una comuna sola solo se cambia si es la línea completa de la
+                    # primera página (bloque de datos del cliente), no en otro texto
+                    if not (es_primera and tokens == d.tokens and not any(ocupado)):
+                        continue
+                for inicio in range(len(tokens) - n + 1):
+                    if any(ocupado[inicio:inicio + n]) or tokens[inicio:inicio + n] != d.tokens:
+                        continue
+                    rect = pymupdf.Rect(linea[inicio][0])
+                    for r, _ in linea[inicio + 1:inicio + n]:
+                        rect |= r
+                    original = " ".join(p for _, p in linea[inicio:inicio + n])
+                    primera, final = linea[inicio][1], linea[inicio + n - 1][1]
+                    cabeza = primera[:len(primera) - len(primera.lstrip("(\"'¿¡"))]
+                    cola = final[len(final.rstrip(".,;:)\"'?!")):]
+                    nucleo = original[len(cabeza):len(original) - len(cola)]
+                    falso = cabeza + mismo_estilo(nucleo, d.falso)
+                    if cola and not falso.endswith(cola):
+                        falso += cola
+                    hallazgos.append((rect, falso))
+                    for k in range(inicio, inicio + n):
+                        ocupado[k] = True
+        return hallazgos
+
+
+def leer_otros(ruta):
+    filas = []
+    for fila in leer_csv_flexible(ruta):
+        filas.append({k.strip().lower(): (v or "").strip() for k, v in fila.items() if k})
+    return filas
+
+
+def siguientes_valores(lineas, i, maximo=2):
+    """Valores en las líneas que siguen a una etiqueta, hasta la próxima etiqueta."""
+    valores = []
+    for linea in lineas[i + 1:i + 1 + maximo]:
+        if not linea.strip() or ETIQUETA_RE.match(linea):
+            break
+        valores.append(linea.strip())
+    return valores
+
+
+def direccion_y_comuna(valor):
+    """"Calle X 123, San Pedro De La Paz, Concepción, Chile" -> "Calle X 123, San Pedro De La Paz"."""
+    partes = [p.strip() for p in valor.split(",") if p.strip()]
+    partes = [p for p in partes if normalizar(p) != "CHILE"]
+    return ", ".join(partes[:2])
+
+
+def en_bloque_cliente(lineas, i):
+    """True si la etiqueta de la línea i está en el bloque "Cliente:" y no en el del ejecutivo."""
+    for linea in reversed(lineas[max(0, i - 8):i]):
+        n = normalizar(linea)
+        if n.startswith(("EJECUTIVO", "ASESOR", "GESTOR")):
+            return False
+        if n.startswith("CLIENTE"):
+            return True
+    return False
+
+
+def direcciones_bloque_postal(lineas):
+    """Bloque de envío de Pershing: nombre, calle, depto y comuna, ciudad, país."""
+    fin = next((j for j, l in enumerate(lineas[:20]) if CODIGO_POSTAL_RE.match(l.strip())), None)
+    if fin is None:
+        return []
+    bloque = [l.strip() for l in lineas[:fin] if l.strip()]
+    con_numero = [j for j, l in enumerate(bloque) if re.search(r"\d", l)]
+    hallados = [("direccion", bloque[j]) for j in con_numero]
+    if con_numero:
+        ultima = normalizar(bloque[con_numero[-1]])
+        tiene_comuna = any(ultima.endswith(" " + c) for c in COMUNAS_CONOCIDAS)
+        siguiente = con_numero[-1] + 1
+        if not tiene_comuna and siguiente < len(bloque) and normalizar(bloque[siguiente]) in COMUNAS_CONOCIDAS:
+            hallados.append(("comuna", bloque[siguiente]))
+    return hallados
+
+
+def cliente_de_archivo(archivo, primera, reemplazador):
+    """El cliente de una cartola: RUT en el nombre del archivo o en la primera página,
+    o si no hay, el primer nombre de cliente que aparezca en la primera página."""
+    for texto in [archivo.name] + primera:
+        for m in RUT_RE.finditer(texto):
+            c = reemplazador.ruts.get(cuerpo_rut(m.group(1)))
+            if c:
+                return c
+    texto = "\n".join(primera)
+    for regex, c, seq in reemplazador.patrones:
+        if (len(seq) >= 2 or c.es_empresa) and regex.search(texto):
+            return c
+    return None
+
+
+def detectar_otros(archivos, raiz, reemplazador, claves=()):
+    hallados = {}
+
+    def agregar(tipo, valor, cliente, carpeta):
+        valor = re.sub(r"\s+", " ", valor).strip(" ,;")
+        if not tokens_de(valor):
+            return
+        fila = hallados.setdefault((tipo, normalizar(valor)), {
+            "tipo": tipo, "valor": valor, "cliente": etiqueta_cliente(cliente),
+            "anonimizar": "si", "falso": "", "veces": 0, "carpetas": set(),
+        })
+        fila["veces"] += 1
+        fila["carpetas"].add(carpeta)
+
+    for archivo in archivos:
+        if archivo.suffix.lower() not in EXT_PDF:
+            continue
+        doc = abrir_pdf(archivo, claves)
+        if doc is None:
+            continue
+        paginas = [p.get_text("text").splitlines() for p in doc]
+        doc.close()
+        partes = archivo.relative_to(raiz).parts
+        carpeta = partes[1] if len(partes) > 2 else partes[0]
+        cliente = cliente_de_archivo(archivo, paginas[0] if paginas else [], reemplazador)
+        for num, lineas in enumerate(paginas):
+            for i, linea in enumerate(lineas):
+                for m in EMAIL_RE.finditer(linea):
+                    if m.group(0).split("@")[1].lower() not in DOMINIOS_INSTITUCION:
+                        agregar("email", m.group(0), cliente, carpeta)
+                for m in CUENTA_RE.finditer(linea):
+                    agregar("cuenta", m.group(1), cliente, carpeta)
+                    agregar("cuenta", m.group(1).replace("-", ""), cliente, carpeta)
+                # código del asesor en Pershing: si son las iniciales de un cliente, es él
+                m = re.match(r"^\s*N[uú]mero de Identificaci[oó]n:\s*([A-Z]{2,5})\s*$", linea)
+                if m:
+                    for c in reemplazador.clientes:
+                        ap = c.indices_apellidos()
+                        if ap and m.group(1) == iniciales(c.tokens, [0] + ap):
+                            agregar("codigo", m.group(1), c, carpeta)
+                m = re.match(r"^\s*Direcci[oó]n\s*:?\s*(.*)$", linea, re.IGNORECASE)
+                if m:
+                    valores = [m.group(1)] if m.group(1).strip() else siguientes_valores(lineas, i)
+                    for v in valores:
+                        agregar("direccion", direccion_y_comuna(v), cliente, carpeta)
+                m = re.match(r"^\s*Comuna\s*:?\s*(.*)$", linea, re.IGNORECASE)
+                if m and num == 0:
+                    valores = [m.group(1)] if m.group(1).strip() else siguientes_valores(lineas, i, 1)
+                    for v in valores:
+                        agregar("comuna", v, cliente, carpeta)
+                m = re.match(r"^\s*Tel[eé]fono\s*:?\s*(.*)$", linea, re.IGNORECASE)
+                if m and en_bloque_cliente(lineas, i):
+                    v = m.group(1).strip() or (lineas[i + 1].strip() if i + 1 < len(lineas) else "")
+                    if sum(ch.isdigit() for ch in v) >= 7:
+                        agregar("telefono", v, cliente, carpeta)
+            if num == 0:
+                for tipo, v in direcciones_bloque_postal(lineas):
+                    agregar(tipo, v, cliente, carpeta)
+                for linea in lineas[:25]:
+                    if DIRECCION_MAYUS_RE.match(linea.strip()):
+                        agregar("direccion", linea.strip(), cliente, carpeta)
+
+    filas = sorted(hallados.values(), key=lambda f: (f["cliente"], f["tipo"], f["valor"]))
+    for f in filas:
+        f["carpetas"] = ", ".join(sorted(f["carpetas"]))
+    return filas
+
 
 # --------------------------------------------------------------------------
 # Verificación
 # --------------------------------------------------------------------------
 
 class Verificador:
-    def __init__(self, clientes):
+    def __init__(self, clientes, otros=None):
         self.rut_res = []
         self.nombre_res = []
         self.suelto_res = []
+        self.otros_res = []  # (tipo, regex)
+        self.comunas = set()
+        self.alias_res = []
+        for d in (otros.datos if otros else []):
+            if d.tipo == "comuna":
+                self.comunas.add(tuple(d.tokens))
+            elif d.tipo == "alias":
+                self.alias_res.append(re.compile(aislado(re.escape(" ".join(d.tokens)), "A-Z0-9")))
+            else:
+                patron = r"[\s,]+".join(re.escape(t) for t in d.tokens)
+                self.otros_res.append((d.tipo, re.compile(aislado(patron, r"A-Z0-9@"))))
+        # un solo recorrido para todos los RUT (con cientos de clientes, una regex por
+        # RUT hace lenta la revisión de archivos grandes)
+        self.ruts_reales = {(c.rut, digito_verificador(c.rut)) for c in clientes if c.rut}
+        self.rut_res.append(re.compile(aislado(r"(\d{7,8})\s*-?\s*([\dK])", r"\d", r"\dA-Z")))
         for c in clientes:
-            if c.rut:
-                self.rut_res.append(re.compile(
-                    aislado(str(c.rut) + r"\s*-?\s*" + digito_verificador(c.rut), r"\d", r"\dA-Z")))
             for seq in c.secuencias():
                 if len(seq) >= 2 or c.es_empresa:
                     self.nombre_res.append(re.compile(
@@ -444,20 +990,34 @@ class Verificador:
                 self.suelto_res.append((c.tokens[i], re.compile(aislado(re.escape(c.tokens[i]), "A-Z"))))
 
     def revisar(self, texto):
-        """Devuelve (problemas, avisos). Problemas impiden copiar el archivo."""
+        """Devuelve (problemas, avisos). Problemas impiden copiar el archivo.
+        Las comunas se revisan aparte, por posición (anonimizar_pdf)."""
         norm = normalizar(texto)
         sin_puntos = norm.replace(".", "")
         problemas = []
-        for r in self.rut_res:
-            if r.search(sin_puntos):
-                problemas.append("queda un RUT real")
-                break
+        if any((int(m.group(1)), m.group(2)) in self.ruts_reales
+               for r in self.rut_res for m in r.finditer(sin_puntos)):
+            problemas.append("queda un RUT real")
         for r in self.nombre_res:
             if r.search(norm):
                 problemas.append("queda un nombre real")
                 break
+        tipos = sorted({tipo for tipo, r in self.otros_res if r.search(norm)})
+        if tipos:
+            problemas.append("queda un dato real: " + ", ".join(tipos))
         avisos = sorted({tok for tok, r in self.suelto_res if r.search(norm)})
         return problemas, avisos
+
+    def revisar_nombre_archivo(self, ruta):
+        """Para nombres de archivo también cuentan un nombre de pila o un alias sueltos."""
+        texto = re.sub(r"[_\-]+", " ", str(ruta))
+        problemas, avisos = self.revisar(texto)
+        if avisos:
+            problemas.append("el nombre del archivo tiene un nombre de pila real")
+        norm = normalizar(texto)
+        if any(r.search(norm) for r in self.alias_res):
+            problemas.append("el nombre del archivo tiene un alias real")
+        return problemas
 
 
 # --------------------------------------------------------------------------
@@ -533,6 +1093,102 @@ def franja_central(rect, direccion):
     return pymupdf.Rect(rect.x0 + 0.3 * ancho, rect.y0 + 0.3, rect.x1 - 0.3 * ancho, rect.y1 - 0.3)
 
 
+def franja_segura(rect, direccion, otras):
+    """Como franja_central, pero si otra palabra se monta sobre el dato (p. ej. un
+    texto blanco escondido detrás de otro párrafo), usa la parte del alto del dato
+    que ninguna otra palabra toca. Devuelve None si no queda ninguna parte libre."""
+    horizontal = direccion[1] == 0
+    lo, hi = (rect.y0, rect.y1) if horizontal else (rect.x0, rect.x1)
+    a0, a1 = (rect.x0 + 0.3, rect.x1 - 0.3) if horizontal else (rect.y0 + 0.3, rect.y1 - 0.3)
+    ocupados = []
+    for o in otras:
+        o0, o1 = (o.x0, o.x1) if horizontal else (o.y0, o.y1)
+        t0, t1 = (o.y0, o.y1) if horizontal else (o.x0, o.x1)
+        if o1 > a0 and o0 < a1 and t1 > lo and t0 < hi:
+            ocupados.append((max(t0, lo), min(t1, hi)))
+    libres, pos = [], lo
+    for t0, t1 in sorted(ocupados):
+        if t0 > pos:
+            libres.append((pos, t0))
+        pos = max(pos, t1)
+    if pos < hi:
+        libres.append((pos, hi))
+
+    def armar(b0, b1):
+        return pymupdf.Rect(a0, b0, a1, b1) if horizontal else pymupdf.Rect(b0, a0, b1, a1)
+    c0, c1 = lo + 0.3 * (hi - lo), hi - 0.3 * (hi - lo)
+    if any(l0 <= c0 and c1 <= l1 for l0, l1 in libres):
+        return armar(c0, c1)
+    mejor = max(libres, key=lambda l: l[1] - l[0], default=None)
+    if mejor is None or mejor[1] - mejor[0] < 0.6:
+        return None
+    margen = min(0.2, (mejor[1] - mejor[0]) / 4)
+    return armar(mejor[0] + margen, mejor[1] - margen)
+
+
+def opciones_redaccion():
+    opciones = {"images": pymupdf.PDF_REDACT_IMAGE_NONE}
+    if hasattr(pymupdf, "PDF_REDACT_LINE_ART_NONE"):
+        opciones["graphics"] = pymupdf.PDF_REDACT_LINE_ART_NONE
+    return opciones
+
+
+def borra_solo_el_dato(doc, numero, franja, rect):
+    """Prueba la redacción en una copia de la página: True si borra todas las
+    palabras del dato y ninguna otra (ni deja pedazos de palabras)."""
+    copia = pymupdf.open()
+    copia.insert_pdf(doc, from_page=numero, to_page=numero)
+    pagina = copia[0]
+    antes = contar_palabras(pagina)
+    objetivo = palabras_en(pagina, [rect])
+    pagina.add_redact_annot(franja, fill=None)
+    pagina.apply_redactions(**opciones_redaccion())
+    despues = contar_palabras(pagina)
+    copia.close()
+    return bool(objetivo) and antes - despues == objetivo and not (despues - antes)
+
+
+def elegir_franja(doc, numero, rect, direccion, otras):
+    """La franja central sirve si ninguna otra palabra la toca. Si alguna se monta
+    sobre el dato, las cajas de get_text no bastan para saber qué borrará la
+    redacción (son más altas que las que usa MuPDF): se prueban franjas delgadas a
+    distintas alturas en una copia de la página y se usa la primera que borra solo
+    el dato. None si ninguna sirve."""
+    central = franja_central(rect, direccion)
+    if not any(abs(central & o) > 0 for o in otras):
+        return central
+    candidatas = [franja_segura(rect, direccion, otras)]
+    horizontal = direccion[1] == 0
+    lo, hi = (rect.y0, rect.y1) if horizontal else (rect.x0, rect.x1)
+    a0, a1 = (rect.x0 + 0.3, rect.x1 - 0.3) if horizontal else (rect.y0 + 0.3, rect.y1 - 0.3)
+    for fraccion in (0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.12, 0.88):
+        b = lo + fraccion * (hi - lo)
+        candidatas.append(pymupdf.Rect(a0, b - 0.1, a1, b + 0.1) if horizontal
+                          else pymupdf.Rect(b - 0.1, a0, b + 0.1, a1))
+    for franja in candidatas:
+        if franja is not None and borra_solo_el_dato(doc, numero, franja, rect):
+            return franja
+    return None
+
+
+def dentro_de(rect_palabra, rects):
+    """La palabra está (casi) entera dentro de uno de los rectángulos reemplazados."""
+    area = abs(rect_palabra)
+    return area > 0 and any(abs(rect_palabra & r) >= 0.8 * area for r in rects)
+
+
+def lineas_comuna(pagina, comunas):
+    """Rectángulos de las líneas de la página que son solo una comuna de cliente."""
+    rects = []
+    for linea in palabras_por_linea(pagina):
+        if tuple(t for t in (limpiar_token(p) for _, p in linea) if t) in comunas:
+            r = pymupdf.Rect(linea[0][0])
+            for otro, _ in linea[1:]:
+                r |= otro
+            rects.append(r)
+    return rects
+
+
 def palabras_por_linea(pagina):
     lineas = {}
     for x0, y0, x1, y1, palabra, b, l, w in pagina.get_text("words"):
@@ -565,10 +1221,32 @@ def buscar_nombres(pagina, reemplazador):
                     falso = cabeza + falso
                     if cola and not falso.endswith(cola):
                         falso += cola
+                    inicial = inicial_materna(cliente, seq, linea, inicio + n, ocupado)
+                    if inicial:
+                        rect |= linea[inicio + n][0]
+                        falso += " " + inicial
+                        ocupado[inicio + n] = True
                     hallazgos.append((rect, falso))
                     for k in range(inicio, inicio + n):
                         ocupado[k] = True
     return hallazgos
+
+
+def inicial_materna(cliente, seq, linea, pos, ocupado):
+    """En "Perez S." la inicial del apellido materno también identifica: si la
+    secuencia termina en el apellido paterno y la palabra siguiente es la inicial
+    del materno, devuelve la inicial falsa ("P."). Si no, None."""
+    apellidos = cliente.indices_apellidos()
+    if len(apellidos) != 2 or seq[-1] != apellidos[0] or apellidos[1] in seq:
+        return None
+    if pos >= len(linea) or ocupado[pos]:
+        return None
+    palabra = linea[pos][1]
+    if not re.fullmatch(r"[^\W\d_]\.?", palabra):
+        return None
+    if limpiar_token(palabra) != cliente.tokens[apellidos[1]][:1]:
+        return None
+    return limpiar_token(cliente.falsos[apellidos[1]])[:1] + ("." if palabra.endswith(".") else "")
 
 
 def buscar_ruts(pagina, reemplazador):
@@ -625,7 +1303,55 @@ def largo_texto(texto):
     return len(re.sub(r"\s+", "", texto))
 
 
-def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
+def contar_palabras(pagina):
+    return Counter(t for t in (limpiar_token(w[4]) for w in pagina.get_text("words")) if t)
+
+
+def palabras_en(pagina, rects):
+    """Palabras que quedan dentro de alguno de los rectángulos reemplazados."""
+    dentro = Counter()
+    for x0, y0, x1, y1, palabra, *_ in pagina.get_text("words"):
+        if dentro_de(pymupdf.Rect(x0, y0, x1, y1), rects):
+            t = limpiar_token(palabra)
+            if t:
+                dentro[t] += 1
+    return dentro
+
+
+def tamano_que_cabe(texto, tamano, fuente, rect, direccion):
+    """Achica la letra (hasta 70 %) si el reemplazo no cabe donde estaba el original,
+    para que no se monte sobre la palabra siguiente."""
+    ancho = rect.width if direccion[1] == 0 else rect.height
+    largo = pymupdf.get_text_length(texto, fontname=fuente, fontsize=tamano)
+    if largo <= ancho or largo == 0:
+        return tamano
+    return max(tamano * ancho / largo, tamano * 0.7)
+
+
+def valores_internos(doc):
+    """Los diccionarios de todos los objetos del PDF (metadatos, enlaces, formularios,
+    marcadores...) y los streams de metadatos y adjuntos, para buscar datos reales
+    fuera del texto de las páginas. Las fuentes e imágenes no se revisan: son
+    binarias y pueden contener cualquier secuencia de letras."""
+    partes = []
+    for xref in range(1, doc.xref_length()):
+        try:
+            objeto = doc.xref_object(xref, compressed=True)
+            partes.append(objeto)
+            if doc.xref_is_stream(xref) and re.search(r"/Type\s*/(Metadata|EmbeddedFile)", objeto):
+                partes.append((doc.xref_stream(xref) or b"").decode("utf-8", "replace"))
+        except Exception:
+            continue
+    return "\n".join(partes)
+
+
+def texto_sin_recorte(pagina):
+    """Texto de la página incluido el que queda fuera del área visible."""
+    flags = pymupdf.TEXTFLAGS_TEXT & ~getattr(pymupdf, "TEXT_MEDIABOX_CLIP", 0)
+    return pagina.get_text("text", flags=flags)
+
+
+def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=(), otros=None):
     doc = abrir_pdf(origen, claves)
     if doc is None:
         return 0, [f"el PDF tiene clave y no es el RUT de ningún cliente ni está en {ARCHIVO_CLAVES}"], []
@@ -634,10 +1360,16 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
         doc.close()
         return 0, ["el PDF no tiene texto que se pueda leer (¿escaneado?)"], []
     problemas, avisos, cambios = [], [], 0
+    # líneas de la primera página que son solo la comuna del cliente ("Comuna:" de BICE)
+    comunas = getattr(verificador, "comunas", set())
+    lugares_comuna = lineas_comuna(doc[0], comunas) if doc.page_count and comunas else []
     for pagina in doc:
         for campo in pagina.widgets() or []:
             if isinstance(campo.field_value, str):
                 nuevo, n = reemplazador.reemplazar(campo.field_value)
+                if otros:
+                    nuevo, m = otros.reemplazar(nuevo)
+                    n += m
                 if n:
                     campo.field_value = nuevo
                     campo.update()
@@ -646,6 +1378,10 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
             info = anotacion.info
             nuevo, n = reemplazador.reemplazar(info.get("content", ""))
             titulo, m = reemplazador.reemplazar(info.get("title", ""))
+            if otros:
+                nuevo, n2 = otros.reemplazar(nuevo)
+                titulo, m2 = otros.reemplazar(titulo)
+                n, m = n + n2, m + m2
             if n or m:
                 anotacion.set_info(content=nuevo, title=titulo)
                 anotacion.update()
@@ -657,7 +1393,11 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
             problemas.append(f"el texto de la página {pagina.number + 1} no se puede leer bien")
             continue
         hallazgos = []
-        for rect, nuevo in buscar_ruts(pagina, reemplazador) + buscar_nombres(pagina, reemplazador):
+        candidatos = buscar_ruts(pagina, reemplazador)
+        if otros:
+            candidatos += otros.buscar_en_pagina(pagina, pagina.number == 0)
+        candidatos += buscar_nombres(pagina, reemplazador)
+        for rect, nuevo in candidatos:
             if any(abs(rect & r) > 0.3 * abs(rect) for r, _ in hallazgos):
                 continue
             hallazgos.append((rect, nuevo))
@@ -668,19 +1408,38 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
         if any(e[4] not in ROTACIONES for e in estilos):
             problemas.append(f"la página {pagina.number + 1} tiene un nombre o RUT en texto inclinado")
             continue
-        for (rect, _), estilo in zip(hallazgos, estilos):
-            pagina.add_redact_annot(franja_central(rect, estilo[4]), fill=None)
-        opciones = {"images": pymupdf.PDF_REDACT_IMAGE_NONE}
-        if hasattr(pymupdf, "PDF_REDACT_LINE_ART_NONE"):
-            opciones["graphics"] = pymupdf.PDF_REDACT_LINE_ART_NONE
-        pagina.apply_redactions(**opciones)
+        antes = contar_palabras(pagina)
+        rects = [r for r, _ in hallazgos]
+        reemplazadas = palabras_en(pagina, rects)
+        otras = [pymupdf.Rect(w[:4]) for w in pagina.get_text("words")
+                 if not dentro_de(pymupdf.Rect(w[:4]), rects)]
+        franjas = [elegir_franja(doc, pagina.number, rect, estilo[4], otras)
+                   for rect, estilo in zip(rects, estilos)]
+        if any(f is None for f in franjas):
+            problemas.append(f"la página {pagina.number + 1} tiene un dato montado sobre otra línea "
+                             f"y no se puede borrar sin tocarla")
+            continue
+        for franja in franjas:
+            pagina.add_redact_annot(franja, fill=None)
+        pagina.apply_redactions(**opciones_redaccion())
         for (rect, nuevo), (tamano, color, negrita, origen, direccion) in zip(hallazgos, estilos):
+            fuente = "hebo" if negrita else "helv"
             pagina.insert_text(
                 punto_inicio(rect, origen, direccion), nuevo,
-                fontsize=tamano, fontname="hebo" if negrita else "helv", color=color,
+                fontsize=tamano_que_cabe(nuevo, tamano, fuente, rect, direccion),
+                fontname=fuente, color=color,
                 rotate=ROTACIONES[direccion],
+                # texto blanco = escondido detrás de otro: va debajo, como el original,
+                # para no borronear el texto visible que tiene encima
+                overlay=min(color) < 0.95,
             )
             cambios += 1
+        # Ninguna palabra fuera de los datos reemplazados puede desaparecer: si la
+        # redacción borró letras de una línea vecina, el montaje no es confiable.
+        perdidas = (antes - contar_palabras(pagina)) - reemplazadas
+        if perdidas:
+            problemas.append(f"la página {pagina.number + 1} perdió {sum(perdidas.values())} "
+                             f"palabras que no eran datos del cliente")
     if problemas:
         doc.close()
         return cambios, problemas, avisos
@@ -701,14 +1460,23 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
     verificado = pymupdf.open(destino)
     partes = []
     for p in verificado:
-        partes.append(p.get_text("text"))
+        partes.append(texto_sin_recorte(p))
         partes += [str(w.field_value) for w in (p.widgets() or []) if w.field_value]
         partes += [a.info.get("content", "") + " " + a.info.get("title", "") for a in (p.annots() or [])]
+        partes += [enlace.get("uri", "") or "" for enlace in p.get_links()]
     texto = "\n".join(partes)
     texto += "\n" + " ".join(str(v) for v in (verificado.metadata or {}).values() if v)
+    quedan_comunas = [r for r in (lineas_comuna(verificado[0], comunas) if lugares_comuna else [])
+                      if any(abs(r & l) > 0.5 * abs(r) for l in lugares_comuna)]
     texto_final = largo_texto("".join(p.get_text("text") for p in verificado))
+    internos = valores_internos(verificado)
     verificado.close()
     problemas, avisos = verificador.revisar(texto)
+    if quedan_comunas:
+        problemas.append("queda la comuna real del cliente")
+    problemas_internos, _ = verificador.revisar(internos)
+    if problemas_internos:
+        problemas.append("dentro del archivo (fuera del texto visible) " + "; ".join(problemas_internos))
     # Los reemplazos tienen largo parecido; si se pierde mucho texto, algo salió mal
     # y la verificación no sería confiable.
     if texto_final < 0.9 * texto_original:
@@ -722,11 +1490,20 @@ def anonimizar_pdf(origen, destino, reemplazador, verificador, claves=()):
 # Excel y texto
 # --------------------------------------------------------------------------
 
-def anonimizar_excel(origen, destino, reemplazador, verificador):
+def reemplazar_todo(texto, reemplazador, otros=None):
+    """RUT y nombres, y después los otros datos del cliente."""
+    texto, n = reemplazador.reemplazar(texto)
+    if otros:
+        texto, m = otros.reemplazar(texto)
+        n += m
+    return texto, n
+
+
+def anonimizar_excel(origen, destino, reemplazador, verificador, otros=None):
     libro = openpyxl.load_workbook(origen, keep_vba=origen.suffix.lower() == ".xlsm")
     cambios = 0
     for hoja in libro.worksheets:
-        titulo, n = reemplazador.reemplazar(hoja.title)
+        titulo, n = reemplazar_todo(hoja.title, reemplazador, otros)
         if n:
             hoja.title = titulo[:31]
             cambios += n
@@ -734,8 +1511,8 @@ def anonimizar_excel(origen, destino, reemplazador, verificador):
         for fila in hoja.iter_rows():
             for celda in fila:
                 if celda.comment is not None:
-                    texto, n = reemplazador.reemplazar(celda.comment.text)
-                    autor, m = reemplazador.reemplazar(celda.comment.author or "")
+                    texto, n = reemplazar_todo(celda.comment.text, reemplazador, otros)
+                    autor, m = reemplazar_todo(celda.comment.author or "", reemplazador, otros)
                     if n or m:
                         celda.comment = openpyxl.comments.Comment(texto, autor)
                         cambios += n + m
@@ -745,7 +1522,7 @@ def anonimizar_excel(origen, destino, reemplazador, verificador):
                         columnas_rut.add(celda.column)
                     if re.fullmatch(r"\s*D\.?\s*V\.?\s*", v.upper()):
                         columnas_dv.add(celda.column)
-                    nuevo, n = reemplazador.reemplazar(v)
+                    nuevo, n = reemplazar_todo(v, reemplazador, otros)
                     if n:
                         celda.value = nuevo
                         cambios += n
@@ -784,7 +1561,7 @@ def anonimizar_excel(origen, destino, reemplazador, verificador):
     return cambios, problemas, avisos
 
 
-def anonimizar_texto(origen, destino, reemplazador, verificador):
+def anonimizar_texto(origen, destino, reemplazador, verificador, otros=None):
     contenido = origen.read_bytes()
     for codificacion in ("utf-8-sig", "cp1252", "latin-1"):
         try:
@@ -792,8 +1569,10 @@ def anonimizar_texto(origen, destino, reemplazador, verificador):
             break
         except UnicodeDecodeError:
             continue
-    nuevo, cambios = reemplazador.reemplazar(texto)
+    nuevo, cambios = reemplazar_todo(texto, reemplazador, otros)
     problemas, avisos = verificador.revisar(nuevo)
+    if codificacion == "utf-8-sig" and not contenido.startswith(b"\xef\xbb\xbf"):
+        codificacion = "utf-8"  # sin esto la copia gana un BOM que el original no tenía
     if not problemas:
         destino.parent.mkdir(parents=True, exist_ok=True)
         destino.write_bytes(nuevo.encode(codificacion))
@@ -902,10 +1681,39 @@ def detectar_clientes(archivos, raiz, claves_extra=()):
 # Programa principal
 # --------------------------------------------------------------------------
 
+def agregar_ruts_nuevos(ruta_clientes, archivos, raiz, claves_extra=()):
+    """Agrega al final de clientes.csv los RUT que aparecen en los archivos y que
+    todavía no están en la lista (ni siquiera con "no"). Devuelve las filas nuevas."""
+    filas = leer_csv_flexible(ruta_clientes)
+    columnas = ["rut", "nombre", "tipo", "anonimizar", "veces", "carpetas"]
+    for fila in filas:
+        columnas += [k for k in fila if k and k not in columnas]
+    conocidos = set()
+    for fila in filas:
+        m = re.match(r"^\s*([\d.]+)", fila.get("rut", "") or "")
+        if m and m.group(1).replace(".", ""):
+            conocidos.add(cuerpo_rut(m.group(1)))
+    nuevos = [f for f in detectar_clientes(archivos, raiz, claves_extra)
+              if cuerpo_rut(f["rut"].split("-")[0]) not in conocidos]
+    if nuevos:
+        escribir_csv(ruta_clientes, [{k: f.get(k, "") for k in columnas} for f in filas + nuevos], columnas)
+    return nuevos
+
+
+def nombre_falso(parte, reemplazador, otros):
+    """Nombre de archivo o carpeta: RUT, nombres, otros datos, alias y palabras sueltas."""
+    nuevo = reemplazador.reemplazar(parte)[0]
+    if otros:
+        nuevo = otros.reemplazar(nuevo, con_alias=True)[0]
+    return reemplazador.reemplazar_sueltos(nuevo)
+
+
 def listar_archivos(raiz):
     archivos = []
     for nombre in CARPETAS_ENTRADA:
-        carpeta = next((p for p in raiz.iterdir() if p.is_dir() and p.name.lower() == nombre.lower()), None)
+        # "Example" también acepta "Example Export" y similares
+        carpeta = next((p for p in raiz.iterdir() if p.is_dir() and (
+            p.name.lower() == nombre.lower() or p.name.lower().startswith(nombre.lower() + " "))), None)
         if carpeta is None:
             print(f"Aviso: no encontré la carpeta \"{nombre}\" en {raiz}")
             continue
@@ -952,6 +1760,12 @@ def main():
         print("Después vuelve a correr este mismo comando.")
         return 0
 
+    nuevos = agregar_ruts_nuevos(ruta_clientes, archivos, raiz, leer_claves_extra(raiz))
+    if nuevos:
+        print(f"Encontré {len(nuevos)} RUT que no estaban en {ARCHIVO_CLIENTES} y los agregué al final")
+        print("(columna \"carpetas\": dónde aparecen). Revísalos y vuelve a correr este comando.")
+        return 0
+
     clientes = leer_clientes(ruta_clientes)
     if not clientes:
         print(f"{ARCHIVO_CLIENTES} no tiene clientes para anonimizar.")
@@ -961,8 +1775,24 @@ def main():
     asignar_falsos(clientes, leer_mapeo(ruta_mapeo), rng)
     guardar_mapeo(ruta_mapeo, clientes)
     reemplazador = Reemplazador(clientes)
-    verificador = Verificador(clientes)
     claves = claves_posibles([c.rut for c in clientes if c.rut], leer_claves_extra(raiz))
+
+    ruta_otros = raiz / ARCHIVO_OTROS
+    if not ruta_otros.exists():
+        print("Buscando direcciones, comunas, emails, teléfonos y cuentas de los clientes...")
+        filas = detectar_otros(archivos, raiz, reemplazador, claves)
+        escribir_csv(ruta_otros, filas, COLUMNAS_OTROS)
+        por_tipo = Counter(f["tipo"] for f in filas)
+        print(f"\nEncontré {len(filas)} datos y los dejé en {ARCHIVO_OTROS}: "
+              + ", ".join(f"{n} {tipo}" for tipo, n in sorted(por_tipo.items())))
+        print("Revísalo antes de seguir: \"no\" en lo que no sea del cliente, agrega lo que falte")
+        print("y los alias de los nombres de archivo (tipo \"alias\"). Después vuelve a correr este comando.")
+        return 0
+    filas_otros = leer_otros(ruta_otros)
+    otros = OtrosDatos(filas_otros, clientes, rng)
+    if otros.generados:
+        escribir_csv(ruta_otros, [{k: f.get(k, "") for k in COLUMNAS_OTROS} for f in filas_otros], COLUMNAS_OTROS)
+    verificador = Verificador(clientes, otros)
 
     salida = raiz / CARPETA_SALIDA
     if salida.exists():
@@ -974,20 +1804,30 @@ def main():
     print(f"Anonimizando {len(archivos)} archivos de {len(clientes)} clientes...")
     for archivo in archivos:
         relativo = archivo.relative_to(raiz)
-        partes = [reemplazador.reemplazar(p)[0] for p in relativo.parts]
+        partes = [nombre_falso(p, reemplazador, otros) for p in relativo.parts]
         destino = salida.joinpath(*partes)
+        n = 2
+        while destino.exists():  # dos archivos que quedarían con el mismo nombre
+            partes[-1] = f"{Path(partes[-1]).stem} ({n}){Path(partes[-1]).suffix}"
+            destino = salida.joinpath(*partes)
+            n += 1
         ext = archivo.suffix.lower()
         try:
             if ext in EXT_PDF:
-                cambios, problemas, avisos = anonimizar_pdf(archivo, destino, reemplazador, verificador, claves)
+                cambios, problemas, avisos = anonimizar_pdf(archivo, destino, reemplazador, verificador, claves, otros)
             elif ext in EXT_EXCEL:
-                cambios, problemas, avisos = anonimizar_excel(archivo, destino, reemplazador, verificador)
+                cambios, problemas, avisos = anonimizar_excel(archivo, destino, reemplazador, verificador, otros)
             elif ext in EXT_TEXTO:
-                cambios, problemas, avisos = anonimizar_texto(archivo, destino, reemplazador, verificador)
+                cambios, problemas, avisos = anonimizar_texto(archivo, destino, reemplazador, verificador, otros)
             else:
                 cambios, problemas, avisos = 0, [f"tipo de archivo {ext or 'sin extensión'} no soportado"], []
         except Exception as e:
             cambios, problemas, avisos = 0, [f"error al procesar: {e}"], []
+            if destino.exists():
+                destino.unlink()
+        problemas_nombre = verificador.revisar_nombre_archivo(Path(*partes))
+        if problemas_nombre:
+            problemas = problemas + problemas_nombre
             if destino.exists():
                 destino.unlink()
 
@@ -998,7 +1838,7 @@ def main():
             resumen.append(f"NO COPIADO  {destino_rel}: {'; '.join(p.split(':')[0] for p in problemas)}")
         else:
             copiados += 1
-            linea = f"OK          {relativo} ({cambios} reemplazos)"
+            linea = f"OK          {relativo} -> {destino_rel} ({cambios} reemplazos)"
             if avisos:
                 linea += f"  revisar nombres sueltos: {', '.join(avisos)}"
             reporte.append(linea)
@@ -1017,8 +1857,10 @@ def main():
     print("\n".join(encabezado))
     if fallidos:
         print(f"Los archivos no copiados y el motivo están en {ARCHIVO_REPORTE}.")
-    print(f"La carpeta {CARPETA_SALIDA} no tiene nombres ni RUT reales de los clientes de {ARCHIVO_CLIENTES}.")
-    print(f"No compartas {ARCHIVO_CLIENTES}, {ARCHIVO_MAPEO} ni {ARCHIVO_REPORTE}: tienen datos reales.")
+    print(f"La carpeta {CARPETA_SALIDA} no tiene nombres, RUT ni otros datos reales de los clientes "
+          f"de {ARCHIVO_CLIENTES} y {ARCHIVO_OTROS}.")
+    print(f"No compartas {ARCHIVO_CLIENTES}, {ARCHIVO_OTROS}, {ARCHIVO_MAPEO} ni {ARCHIVO_REPORTE}: "
+          "tienen datos reales.")
     return 0
 
 
