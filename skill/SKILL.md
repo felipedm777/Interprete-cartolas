@@ -9,7 +9,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 
 ## Cómo usarla
 
-Desde la carpeta `skill/`:
+Desde la carpeta de esta skill (la que contiene `cartolas/`; en el repositorio, `skill/`), con Python y `pymupdf`:
 
 ```
 python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109]
