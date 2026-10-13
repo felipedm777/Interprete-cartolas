@@ -1,30 +1,40 @@
-"""Eventos de capital de los fondos, tomados de DataFondos.
+"""Eventos de capital de acciones y fondos, tomados de la Bolsa y de DataFondos.
 
 Las cartolas abonan dividendos, repartos de capital y disminuciones de capital
-en la caja del cliente, pero no siempre dicen de qué fondo vienen ni de qué
-evento se trata: la cartola BICE nueva imprime "DIVIDENDO EN PESOS" o "REPARTO
-DE DINERO" sin el instrumento, y la Security pone el nemotécnico pero no el
-monto por cuota con el que se puede comprobar el abono.
+en la caja del cliente, pero no siempre dicen de qué instrumento vienen ni de
+qué evento se trata: la cartola BICE nueva imprime "DIVIDENDO EN PESOS" o
+"REPARTO DE DINERO" sin el instrumento, y la Security pone el nemotécnico pero
+no el monto por cuota con el que se puede comprobar el abono.
 
-DataFondos publica, por fondo y serie, cada reparto con su fecha límite, su
-fecha de pago y el monto por cuota. Con esa tabla, un abono se explica cuando
-el monto por cuota de un evento multiplicado por las cuotas que el cliente
-tiene en ese fondo da el monto abonado: eso identifica el fondo y distingue un
-dividendo de un reparto o una disminución de capital. Lo que la tabla no
-explica queda marcado como dudoso en el reporte, nunca completado a mano.
+La Bolsa de Santiago y DataFondos publican cada dividendo y reparto con su
+fecha límite, su fecha de pago y el monto por acción o cuota. Con esa tabla, un
+abono se explica cuando el monto por cuota de un evento multiplicado por las
+cuotas que el cliente tiene en ese instrumento da el monto abonado: eso
+identifica el instrumento y distingue un dividendo de un reparto o una
+disminución de capital. Lo que la tabla no explica queda marcado como dudoso en
+el reporte, nunca completado a mano.
 
-La tabla se consulta en DataFondos (`dividendos` por fondo) y se guarda en
-`datos/eventos_capital.csv`. Junto a ella, `datos/datafondos_cobertura.csv`
-guarda lo que devuelve `resumen_dividendos`: qué fondos sigue DataFondos, hasta
-qué fecha tiene sus repartos y cuándo los actualizó. Con eso cada abono dudoso
-queda con su causa (falta consultar un fondo, lo explican varios fondos, ningún
-reparto publicado cuadra, o DataFondos no tiene un reparto que lo pague) y el
-reporte dice qué fondos consultar. Para agregar las respuestas, guardar cada
-una en un archivo JSON y correr:
+La tabla tiene dos partes:
+
+- La de la Bolsa (`datos/eventos_bolsa_<AAAAMMDD>.csv`) sale del Excel de
+  dividendos y repartos que la Bolsa publica cada día, con las acciones, los
+  fondos de inversión y los emisores extranjeros que se transan en ella. Se
+  baja y se regenera con `python -m cartolas.bolsa` (módulo `bolsa`).
+- La de DataFondos (`datos/eventos_capital.csv`) se consulta fondo por fondo
+  (`dividendos`) y completa los fondos que la Bolsa no publica. Junto a ella,
+  `datos/datafondos_cobertura.csv` guarda lo que devuelve `resumen_dividendos`:
+  qué fondos sigue DataFondos, hasta qué fecha tiene sus repartos y cuándo los
+  actualizó. Para agregar las respuestas, guardar cada una en un archivo JSON y
+  correr:
 
     python -m cartolas.eventos_capital <respuesta.json>...
 
-Las dos tablas solo tienen datos públicos de fondos: nunca datos de clientes.
+Con la fecha del Excel de la Bolsa y la cobertura de DataFondos, cada abono
+dudoso queda con su causa (falta bajar el Excel al día, falta consultar un
+fondo, lo explican varios instrumentos, ningún reparto publicado cuadra, o nadie
+publica un reparto que lo pague) y el reporte dice qué hacer.
+
+Las tablas solo tienen datos públicos de instrumentos: nunca datos de clientes.
 """
 
 import argparse
@@ -67,21 +77,27 @@ _COLUMNAS_COBERTURA = (
     "Actualizado",
 )
 
-# Causas de un abono dudoso, de la que se resuelve consultando DataFondos a la
-# que DataFondos no puede resolver.
-POR_CONSULTAR = "Falta consultar fondos en DataFondos"
-VARIOS = "Lo explican varios fondos"
-NO_CUADRA = "Ningún reparto publicado cuadra con el monto"
-SIN_REPARTO = "DataFondos no tiene un reparto que lo pague"
-CAUSAS = (POR_CONSULTAR, VARIOS, NO_CUADRA, SIN_REPARTO)
+# De dónde viene un evento.
+BOLSA = "Bolsa"
+DATAFONDOS = "DataFondos"
 
-# Qué sabe DataFondos de un instrumento de la cuenta en la fecha de un abono.
+# Causas de un abono dudoso, de las que se resuelven actualizando las tablas a
+# las que ninguna fuente puede resolver.
+POR_BAJAR = "Falta bajar el Excel de la Bolsa al día"
+POR_CONSULTAR = "Falta consultar fondos en DataFondos"
+VARIOS = "Lo explican varios instrumentos"
+NO_CUADRA = "Ningún reparto publicado cuadra con el monto"
+SIN_REPARTO = "Ni la Bolsa ni DataFondos publican un reparto que lo pague"
+CAUSAS = (POR_BAJAR, POR_CONSULTAR, VARIOS, NO_CUADRA, SIN_REPARTO)
+
+# Qué se sabe de un instrumento de la cuenta en la fecha de un abono.
 _PUBLICADO = "con reparto publicado que no cuadra"
+_BAJAR = "por bajar el Excel de la Bolsa"
 _CONSULTAR = "por consultar en DataFondos"
-_NO_SIGUE = "fondos que DataFondos no sigue"
-_SIN_EVENTO = "fondos sin reparto publicado en la fecha"
-_OTRO = "acciones u otros instrumentos, cuyos dividendos DataFondos no publica"
-_ESTADOS = (_PUBLICADO, _CONSULTAR, _NO_SIGUE, _SIN_EVENTO, _OTRO)
+_NO_SIGUE = "fondos que no siguen ni la Bolsa ni DataFondos"
+_SIN_EVENTO = "sin reparto publicado en la fecha"
+_OTRO = "acciones u otros instrumentos que la Bolsa no publica"
+_ESTADOS = (_PUBLICADO, _BAJAR, _CONSULTAR, _NO_SIGUE, _SIN_EVENTO, _OTRO)
 
 # Clases de evento, normalizadas desde el texto que publica DataFondos.
 DIVIDENDO = "DIVIDENDO"
@@ -143,8 +159,9 @@ class Evento:
     # Excluido a mano del cálculo del valor cuota en DataFondos (la Bolsa lo
     # informó como reparto pero el valor cuota no bajó): no paga dinero.
     anulado: bool = False
-    # Texto tal como lo publica DataFondos, para poder rastrear el dato.
+    # Texto tal como lo publica la fuente, para poder rastrear el dato.
     texto: str = ""
+    fuente: str = DATAFONDOS
 
 
 @dataclass
@@ -158,7 +175,9 @@ class Conciliacion:
     asignados: int = 0
     # Abonos que la tabla no explica, con el motivo.
     dudosos: list[str] = field(default_factory=list)
-    # Discrepancias entre lo que trae la cartola y lo que publica DataFondos.
+    # Abonos que traen su instrumento, pero ningún evento publicado los paga.
+    sin_comprobar: list[str] = field(default_factory=list)
+    # Discrepancias entre lo que trae la cartola y lo publicado.
     revisar: list[str] = field(default_factory=list)
     # Fondos y fechas que faltan en la tabla, para ampliarla desde DataFondos.
     pendientes: set[tuple[str, str]] = field(default_factory=set)
@@ -169,6 +188,7 @@ class Conciliacion:
         self.confirmados += otra.confirmados
         self.asignados += otra.asignados
         self.dudosos += otra.dudosos
+        self.sin_comprobar += otra.sin_comprobar
         self.revisar += otra.revisar
         self.pendientes |= otra.pendientes
         self.causas += otra.causas
@@ -223,17 +243,35 @@ def _fecha(texto: str) -> date | None:
 class Tabla:
     """Eventos de capital por nemotécnico."""
 
-    def __init__(self, eventos: list[Evento]):
+    def __init__(self, eventos: list[Evento], bolsa_al: date | None = None):
         self.eventos = eventos
+        # Fecha del Excel de la Bolsa del que salieron sus eventos: trae todo
+        # lo que la Bolsa había publicado ese día.
+        self.bolsa_al = bolsa_al
         self._por_nemo: dict[str, list[Evento]] = {}
         for e in eventos:
             self._por_nemo.setdefault(_nemo_clave(e.nemotecnico), []).append(e)
+        self._en_bolsa = {_nemo_clave(e.nemotecnico) for e in eventos if e.fuente == BOLSA}
 
     def __len__(self) -> int:
         return len(self.eventos)
 
     @classmethod
-    def cargar(cls, ruta: Path = RUTA_TABLA) -> "Tabla":
+    def unir(cls, *tablas: "Tabla") -> "Tabla":
+        fechas = [t.bolsa_al for t in tablas if t.bolsa_al]
+        return cls([e for t in tablas for e in t.eventos], max(fechas) if fechas else None)
+
+    def de(self, fuente: str) -> list[Evento]:
+        return [e for e in self.eventos if e.fuente == fuente]
+
+    def publica_la_bolsa(self, nemotecnico: str) -> bool:
+        """Si la Bolsa publica los eventos de ese instrumento."""
+        return _nemo_clave(nemotecnico) in self._en_bolsa
+
+    @classmethod
+    def cargar(
+        cls, ruta: Path = RUTA_TABLA, fuente: str = DATAFONDOS, bolsa_al: date | None = None
+    ) -> "Tabla":
         if not ruta.exists():
             return cls([])
         with open(ruta, encoding="utf-8", newline="") as f:
@@ -253,14 +291,17 @@ class Tabla:
                     fecha_pago=_fecha(r["FechaPago"]),
                     anulado=r["Anulado"].strip().upper() in ("1", "SI", "SÍ", "TRUE"),
                     texto=r["Evento"],
+                    fuente=fuente,
                 )
                 for r in filas
-            ]
+            ],
+            bolsa_al,
         )
 
-    def periodo(self) -> tuple[date, date] | None:
-        """Primera y última fecha de pago de la tabla."""
-        fechas = [e.fecha_pago for e in self.eventos if e.fecha_pago]
+    def periodo(self, fuente: str | None = None) -> tuple[date, date] | None:
+        """Primera y última fecha de pago de la tabla, o de una de sus fuentes."""
+        eventos = self.eventos if fuente is None else self.de(fuente)
+        fechas = [e.fecha_pago for e in eventos if e.fecha_pago]
         return (min(fechas), max(fechas)) if fechas else None
 
     def buscar(self, nemotecnico: str, clase: str, fecha: date, moneda: str = "") -> list[Evento]:
@@ -346,17 +387,18 @@ class Cobertura:
 
 
 def _nemo_clave(nemotecnico: str) -> str:
-    """El nemotécnico sin guiones, para buscarlo en la tabla.
+    """El nemotécnico sin guiones ni espacios, para buscarlo en la tabla.
 
     Un mismo fondo y serie se escribe con el guion en dos lugares, y el export de
     BICE usa los dos: `CFI-AMG3RE` y `CFIAMG3R-E`. DataFondos a veces publica
-    solo uno.
+    solo uno, y la Bolsa pone uno en la columna de pesos y el otro en la de
+    dólares.
     """
-    return nemotecnico.upper().replace("-", "")
+    return re.sub(r"[\s-]", "", nemotecnico.upper())
 
 
 def _parece_fondo(nemotecnico: str) -> bool:
-    """Si el nemotécnico es de un fondo, los únicos que publica DataFondos.
+    """Si el nemotécnico es de un fondo, los únicos que sigue DataFondos.
 
     Los nemotécnicos de los fondos de inversión y mutuos chilenos empiezan con
     CFI o CFM; las acciones no, y sus dividendos no están en DataFondos.
@@ -374,8 +416,8 @@ def _cuadra(esperado: Decimal, monto: Decimal, moneda: str) -> bool:
 
 
 def _mismo_por_cuota(impreso: Decimal, publicado: Decimal) -> bool:
-    """Si el monto por cuota impreso en la cartola es el que publica DataFondos,
-    comparado con los decimales que imprime la cartola."""
+    """Si el monto por cuota impreso en la cartola es el publicado, comparado
+    con los decimales que imprime la cartola."""
     decimales = min(-impreso.as_tuple().exponent, 8)
     if decimales <= 0:
         return False
@@ -391,13 +433,14 @@ def conciliar(
 ) -> Conciliacion:
     """Identifica y comprueba con la tabla los abonos por eventos de capital.
 
-    Completa el instrumento de los abonos que no lo traen cuando un solo fondo
-    de la cuenta explica el monto, y deja en la conciliación los que no se
-    pudieron explicar, con su causa. No cambia un instrumento que la cartola ya
-    trae: si no coincide con lo que publica DataFondos, lo anota para revisar.
-    Con la cobertura de DataFondos distingue un fondo que falta consultar de uno
-    que DataFondos no sigue o que no publicó un reparto en la fecha; sin ella,
-    todo fondo que no está en la tabla queda por consultar.
+    Completa el instrumento de los abonos que no lo traen cuando un solo
+    instrumento de la cuenta explica el monto, y deja en la conciliación los
+    que no se pudieron explicar, con su causa. No cambia un instrumento que la
+    cartola ya trae: si no coincide con lo publicado, lo anota para revisar.
+    Con la fecha del Excel de la Bolsa y la cobertura de DataFondos distingue un
+    instrumento que falta actualizar o consultar de uno que nadie sigue o que no
+    publicó un reparto en la fecha; sin la cobertura, todo fondo que no está en
+    la tabla queda por consultar.
     """
     cobertura = cobertura or Cobertura([])
     total = Conciliacion()
@@ -406,20 +449,25 @@ def conciliar(
         total.extender(parte)
         if parte.asignados:
             cartola.avisos.append(
-                f"{parte.asignados} abonos por eventos de capital identificados con DataFondos"
+                f"{parte.asignados} abonos por eventos de capital identificados con los repartos "
+                "publicados"
             )
         if parte.confirmados:
             cartola.controles.append(
                 Control(
-                    "Eventos de capital contra DataFondos",
+                    "Eventos de capital contra los repartos publicados",
                     True,
                     f"{parte.confirmados} abonos cuadran con el reparto publicado",
                 )
             )
         for texto in parte.revisar:
-            cartola.controles.append(Control("Evento de capital contra DataFondos", False, texto))
+            cartola.controles.append(
+                Control("Evento de capital contra los repartos publicados", False, texto)
+            )
         for texto in parte.dudosos:
             cartola.avisos.append(f"Abono dudoso: {texto}")
+        for texto in parte.sin_comprobar:
+            cartola.avisos.append(f"Abono sin comprobar: {texto}")
     return total
 
 
@@ -461,16 +509,16 @@ def _conciliar_cartola(
                 otros = ", ".join(sorted({n for n, _ in explican}))
                 resultado.revisar.append(
                     f"{donde} va con {m.instrumento}, pero el monto no cuadra con el evento "
-                    f"que DataFondos publica para ese fondo"
+                    f"publicado para ese instrumento"
                     + (f" y sí con {otros}" if otros else "")
                 )
-            elif (
-                _parece_fondo(m.instrumento)
-                and _estado(m.instrumento, clase, m.fecha, moneda, tabla, cobertura) == _CONSULTAR
-            ):
-                # La tabla no tiene el reparto que pagó este abono y DataFondos
-                # puede tenerlo.
-                resultado.pendientes.add((m.instrumento, f"{m.fecha:%Y-%m}"))
+            else:
+                estado = _estado(m.instrumento, clase, m.fecha, moneda, tabla, cobertura)
+                resultado.sin_comprobar.append(f"{donde} va con {m.instrumento}: {estado}")
+                if estado == _CONSULTAR:
+                    # La tabla no tiene el reparto que pagó este abono y
+                    # DataFondos puede tenerlo.
+                    resultado.pendientes.add((m.instrumento, f"{m.fecha:%Y-%m}"))
             continue
         candidatos = sorted({n for n, _ in explican})
         if len(candidatos) == 1:
@@ -484,7 +532,9 @@ def _conciliar_cartola(
                 n: _estado(n, clase, m.fecha, moneda, tabla, cobertura) for n in sorted(posiciones)
             }
             causa = (
-                POR_CONSULTAR
+                POR_BAJAR
+                if _BAJAR in estados.values()
+                else POR_CONSULTAR
                 if _CONSULTAR in estados.values()
                 else NO_CUADRA
                 if _PUBLICADO in estados.values()
@@ -507,11 +557,17 @@ def _conciliar_cartola(
 def _estado(
     nemotecnico: str, clase: str, fecha: date, moneda: str, tabla: Tabla, cobertura: Cobertura
 ) -> str:
-    """Qué sabe DataFondos de lo que ese instrumento pudo pagar en la fecha."""
-    if not _parece_fondo(nemotecnico):
-        return _OTRO
+    """Qué se sabe de lo que ese instrumento pudo pagar en la fecha."""
     if tabla.buscar(nemotecnico, clase, fecha, moneda):
         return _PUBLICADO
+    if tabla.publica_la_bolsa(nemotecnico):
+        # El Excel de la Bolsa trae los eventos anunciados hasta su fecha, que
+        # se anuncian antes de pagarse: si es del día del abono o posterior, el
+        # evento que lo pagó tendría que estar.
+        return _SIN_EVENTO if tabla.bolsa_al and tabla.bolsa_al >= fecha else _BAJAR
+    if not _parece_fondo(nemotecnico):
+        # Sin tabla de la Bolsa no se sabe si la Bolsa publica sus dividendos.
+        return _OTRO if tabla.bolsa_al else _BAJAR
     if not len(cobertura):
         # Sin saber qué fondos sigue DataFondos, todo fondo que falta se consulta.
         return _CONSULTAR
@@ -537,7 +593,7 @@ def _explica_titulo(
     titulos: list[MovimientoTitulo], evento: Evento, monto: Decimal, moneda: str
 ) -> bool:
     """Si la cartola trae el movimiento de títulos del evento, con el mismo monto
-    por cuota que publica DataFondos y el monto del abono."""
+    por cuota publicado y el monto del abono."""
     return any(
         t.precio
         and TIPOS_TITULOS.get(t.tipo) == evento.clase
@@ -664,7 +720,8 @@ def _desde_json(datos: object) -> list[Evento]:
 
 
 def _texto_monto(valor: Decimal | None) -> str:
-    return str(valor).replace(".", ",") if valor is not None else ""
+    # Sin notación científica: 1E-7 no se podría volver a leer.
+    return format(valor, "f").replace(".", ",") if valor is not None else ""
 
 
 def escribir(eventos: list[Evento], ruta: Path) -> None:

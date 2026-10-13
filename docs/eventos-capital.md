@@ -1,13 +1,13 @@
-# Eventos de capital con DataFondos
+# Eventos de capital con la Bolsa y DataFondos
 
 Las cartolas abonan en la caja del cliente los dividendos, repartos y
-disminuciones de capital de los fondos, pero no siempre dicen de qué fondo
-vienen ni qué tipo de reparto son. DataFondos publica, por fondo y serie, cada
-reparto con su fecha límite, su fecha de pago y el monto por cuota: con eso un
-abono se puede identificar y comprobar.
+disminuciones de capital de acciones y fondos, pero no siempre dicen de qué
+instrumento vienen ni qué tipo de reparto son. La Bolsa de Santiago y DataFondos
+publican cada dividendo y reparto con su fecha límite, su fecha de pago y el
+monto por acción o cuota: con eso un abono se puede identificar y comprobar.
 
 Este documento no tiene datos de clientes: los montos y nemotécnicos de ejemplo
-son de fondos, que son datos públicos.
+son de instrumentos, que son datos públicos.
 
 ## Qué no queda claro en cada formato
 
@@ -19,13 +19,93 @@ son de fondos, que son datos públicos.
 | Valores Security | `DIVIDENDO EN PESOS`/`EN DOLARES` y `DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL` con el nemotécnico, y el movimiento de títulos con el monto por cuota | Nada que falte; sirve para comprobar contra el reparto publicado |
 | Larrainvial | `ABONO POR DISMINUCION DE CAPITAL`, `DIVIDENDO EN DOLARES` con el nemotécnico | Ídem |
 | Sura | `DIVIDENDO EN PESOS` con el monto | El instrumento, y sin más cartolas del mismo mes no hay con qué compararlo |
-| Pershing | `MONEY FUND INCOME`, `SECURITY LIQUIDATED` | No son fondos chilenos: DataFondos no los cubre |
+| Pershing | `MONEY FUND INCOME`, `SECURITY LIQUIDATED` | No pasan por este emparejamiento |
 
 La cartola BICE nueva también separa el dividendo del reparto de capital en dos
-abonos del mismo día, que es justamente la distinción que DataFondos publica
-("DIVIDENDO PROV.", "REPARTO CAP.").
+abonos del mismo día, que es justamente la distinción que publican la Bolsa y
+DataFondos.
 
-## La tabla
+## Las fuentes
+
+| | Bolsa de Santiago | DataFondos |
+|---|---|---|
+| Qué publica | Dividendos y repartos de acciones nacionales, fondos de inversión (CFI y CFM) y emisores extranjeros que se transan en la Bolsa | Repartos de unos 134 fondos y series, y la fecha de 11 acciones sin el monto |
+| Cómo se obtiene | Un Excel acumulado que la Bolsa publica cada día hábil; `python -m cartolas.bolsa` lo baja y lo lee | Fondo por fondo con el MCP (`dividendos`), más `resumen_dividendos` para saber qué fondos sigue |
+| Tabla de la skill | `datos/eventos_bolsa_<AAAAMMDD>.csv`, con la fecha del Excel | `datos/eventos_capital.csv` y `datos/datafondos_cobertura.csv` |
+| Para qué sirve | La fuente principal: cubre casi todo lo que traen las cartolas | Los fondos que la Bolsa no publica, y los eventos que se informaron pero no pagaron dinero (`Anulado`) |
+
+La skill une las dos tablas. Un mismo evento puede estar en las dos; no importa,
+porque lo que identifica un abono es el instrumento, no el evento.
+
+## La tabla de la Bolsa
+
+La Bolsa publica cada día hábil el Excel "resumen dividendos - repartos -
+emisiones" en
+
+```
+https://servicioscms.bolsadesantiago.com/Paginas/Descarga.aspx?attach=Noticias%2Favisos+generales%2F<AAAAMMDD>+resumen+dividendos+-+repartos+-+emisiones.xlsx
+```
+
+Es acumulado: trae los pagos desde 2022 hasta los ya anunciados, así que basta
+el más reciente. Para una fecha sin archivo (fin de semana, feriado) la Bolsa
+responde una página HTML en vez del Excel: `python -m cartolas.bolsa` prueba
+desde hoy hacia atrás, hasta 10 días, y se queda con el primero que es un Excel
+de verdad. Los cinco de septiembre de 2026 que se probaron están contenidos en
+el del 09-10-2026, salvo entre 0 y 6 eventos por archivo que la Bolsa corrigió
+después.
+
+De sus 16 hojas se leen las 4 que pagan dinero por acción o cuota:
+
+| Hoja | Clase de evento | Nemotécnicos |
+|---|---|---|
+| Dividendos acciones nacionales | `DIVIDENDO`, o `REPARTO DE CAPITAL` si el tipo dice "Reparto" | El de la acción |
+| Dividendos CFI nacionales | Ídem | El de pesos y el de dólares (`CFICPD2A-E` y `CFI-CPD2AE`), que son el mismo sin el guion |
+| Repartos CFI-CFM | `REPARTO DE CAPITAL`, aunque el tipo diga "Provisorio" | Ídem |
+| Dividendos emisores extranjeros | `DIVIDENDO` | El de dólares y el de pesos (`AAPL` y `AAPLCL`): se guardan los dos |
+
+Las demás (fechas sin derecho, emisiones de pago y liberadas, canjes,
+divisiones, stock splits, spin offs, llamados de capital, ofertas públicas y los
+dividendos de emisores colombianos del convenio Cross-Listing) no traen un monto
+en dinero que se pueda cuadrar con un abono.
+
+Cómo se lee cada fila:
+
+- El encabezado se busca por su texto ("Nombre Emisor") y las columnas por su
+  nombre, no por su posición.
+- `MontoPorCuota` es la celda "Por Acción / cuota". Casi siempre es un número.
+  Si es texto, se acepta un número con coma decimal (`7,199693879412`) o con
+  punto y más de tres decimales (`0.17699525`). "Ver documento", "(ver
+  observaciones)" y "-" quedan sin monto. Cualquier otro texto (`2 18,1848371858`)
+  queda sin monto y **dudoso**, con el texto original en `Evento`.
+- La moneda: `$` es CLP, `US$` es USD, `EURO` es EUR y `Soles` es PEN.
+- Una fila sin nemotécnico o sin fecha de pago no es un evento que se pueda
+  cuadrar: se descarta y se cuenta.
+
+`python -m cartolas.bolsa` imprime la cuadratura de cada hoja: filas con
+contenido = eventos leídos + filas descartadas. Con el Excel del 09-10-2026:
+
+| Hoja | Filas | Eventos | Descartadas | Con monto | Dudosos |
+|---|---:|---:|---:|---:|---:|
+| Dividendos acciones nacionales | 1.069 | 1.060 | 9 | 1.060 | 0 |
+| Dividendos CFI nacionales | 12.401 | 12.382 | 19 | 12.245 | 1 |
+| Repartos CFI-CFM | 8.094 | 8.069 | 25 | 6.954 | 1 |
+| Dividendos emisores extranjeros | 4.309 | 4.308 | 1 | 4.308 | 0 |
+
+La tabla guarda los eventos pagados desde el 1 de enero del año anterior al
+Excel (`--desde` cambia la fecha): 16.132 eventos, con pagos del 01-01-2025 al
+04-01-2027. Tiene las mismas columnas que la de DataFondos; `RutFondo` queda
+vacío porque la Bolsa no lo publica. Al escribir la nueva se borra la anterior.
+
+```
+python -m cartolas.bolsa                         # baja el más reciente
+python -m cartolas.bolsa <AAAAMMDD>.xlsx         # usa uno ya bajado
+python -m cartolas.bolsa --desde 2024-01-01      # guarda más historia
+```
+
+Bajarlo necesita internet y leerlo, la librería `openpyxl`. La skill lee solo el
+CSV, o un Excel con `python -m cartolas ... --bolsa <archivo.xlsx>`.
+
+## La tabla de DataFondos
 
 `skill/cartolas/datos/eventos_capital.csv`, con una fila por evento:
 
@@ -54,7 +134,10 @@ El comando no pisa lo que ya había: agrega los eventos nuevos y descarta los
 repetidos. `--desde` deja fuera los eventos de las respuestas pagados antes de
 esa fecha; los que la tabla ya tenía se mantienen.
 
-## La cobertura
+La tabla del repositorio se armó el 08-10-2026 con los 56 fondos que aparecen en
+las cartolas anonimizadas, desde agosto de 2025: 289 eventos.
+
+### La cobertura de DataFondos
 
 `skill/cartolas/datos/datafondos_cobertura.csv` guarda lo que devuelve
 `resumen_dividendos`: cada fondo y serie que sigue DataFondos, cuántos repartos
@@ -66,37 +149,44 @@ CFIAMG3R-E;9879;R;AMERIS NM P CREDIT;51;2026-10-07;2026-10-07
 ```
 
 Se actualiza con el mismo comando: reconoce sola una respuesta de
-`resumen_dividendos` y la guarda en la cobertura en vez de la tabla. Con ella la
-skill sabe, para cada fondo de la cuenta de un abono dudoso, si:
+`resumen_dividendos` y la guarda en la cobertura en vez de la tabla. La que trae
+la skill es del 08-10-2026, con 134 fondos y series.
 
-- DataFondos no lo sigue: consultarlo no sirve.
-- DataFondos lo sigue y tiene repartos más nuevos que la tabla, o los actualizó
-  antes del abono: **falta consultarlo** con `dividendos`.
-- DataFondos lo sigue, la tabla está al día y no hay reparto en la fecha.
+## Qué se sabe de cada instrumento de la cuenta
 
-Sin cobertura, todo fondo que no está en la tabla queda por consultar, como en
-la primera versión. La que trae la skill es del 08-10-2026, con 134 fondos y
-series.
+Para un abono que ningún evento explica, la skill dice qué se sabe de cada
+instrumento de la cuenta en la fecha del abono, en este orden:
+
+1. Tiene un evento publicado en la fecha, pero el monto no da.
+2. La Bolsa publica sus eventos: si el Excel de la tabla es del día del abono o
+   posterior, **no hay reparto publicado en la fecha** (el evento que lo pagó
+   tendría que estar, porque se anuncia antes de pagarse); si es anterior, **falta
+   bajar el Excel al día**.
+3. Es una acción u otro instrumento que no es un fondo y la Bolsa no lo publica.
+   Sin tabla de la Bolsa, falta bajarla.
+4. Es un fondo que la Bolsa no publica: se mira la cobertura de DataFondos.
+   DataFondos no lo sigue; lo sigue y tiene repartos más nuevos que la tabla, o
+   los actualizó antes del abono (**falta consultarlo** con `dividendos`); o lo
+   sigue, la tabla está al día y no hay reparto en la fecha. Sin cobertura, todo
+   fondo que no está en la tabla queda por consultar.
 
 ## Las causas de un abono dudoso
 
 Cada dudoso queda como caja, con una causa en el reporte y el detalle de qué se
-sabe de cada instrumento de la cuenta:
+sabe de cada instrumento de la cuenta. La causa es la primera de esta lista que
+aplica:
 
 | Causa | Cuándo |
 |---|---|
-| Falta consultar fondos en DataFondos | Algún fondo de la cuenta está por consultar. El reporte lista esos fondos con su RUT y el nemotécnico como lo escribe DataFondos, que es lo que pide `dividendos` |
-| Lo explican varios fondos | Más de un fondo de la cuenta tiene un reparto que da el monto |
-| Ningún reparto publicado cuadra con el monto | Algún fondo de la cuenta tiene un reparto en la fecha, pero ninguno da el monto |
-| DataFondos no tiene un reparto que lo pague | Los instrumentos de la cuenta son acciones, fondos que DataFondos no sigue o fondos sin reparto en la fecha |
+| Falta bajar el Excel de la Bolsa al día | Algún instrumento de la cuenta lo publica la Bolsa y el Excel de la tabla es anterior al abono, o no hay tabla de la Bolsa y la cuenta tiene acciones |
+| Falta consultar fondos en DataFondos | Algún fondo de la cuenta que la Bolsa no publica está por consultar. El reporte lista esos fondos con su RUT y el nemotécnico como lo escribe DataFondos, que es lo que pide `dividendos` |
+| Lo explican varios instrumentos | Más de un instrumento de la cuenta tiene un reparto que da el monto |
+| Ningún reparto publicado cuadra con el monto | Algún instrumento de la cuenta tiene un reparto en la fecha, pero ninguno da el monto |
+| Ni la Bolsa ni DataFondos publican un reparto que lo pague | Los instrumentos de la cuenta no tienen reparto publicado en la fecha, son fondos que ninguno de los dos sigue, o son instrumentos que la Bolsa no publica |
 
-El paso a paso para resolver los que faltan consultar, con el MCP de DataFondos,
-está en `skill/SKILL.md`, "Eventos de capital con DataFondos".
-
-La tabla del repositorio se armó el 08-10-2026 con los 56 fondos que aparecen en
-las cartolas anonimizadas, desde agosto de 2025: 289 eventos (234 dividendos, 48
-repartos de capital, 6 emisiones liberadas), con pagos del 05-08-2025 al
-15-10-2026.
+El paso a paso para resolver los que faltan, con el Excel de la Bolsa y el MCP
+de DataFondos, está en `skill/SKILL.md`, "Eventos de capital con la Bolsa y
+DataFondos".
 
 ## Cómo se explica un abono
 
@@ -104,36 +194,39 @@ Para cada abono de los tipos de `TIPOS_CAJA` (los cargos `PAGO DE DIVIDENDOS`
 son el pago al cliente de un dividendo ya abonado, no el evento, y el export los
 deja como caja):
 
-1. Se buscan los eventos de los fondos que la cuenta tiene en cartera, de la
-   clase que corresponde al tipo del movimiento (un `REPARTO DE DINERO` acepta
+1. Se buscan los eventos de los instrumentos que la cuenta tiene en cartera, de
+   la clase que corresponde al tipo del movimiento (un `REPARTO DE DINERO` acepta
    tanto `REPARTO DE CAPITAL` como `DISMINUCION DE CAPITAL`: la Bolsa y las
-   cartolas le ponen los dos nombres al mismo hecho) y con fecha de pago entre
-   6 días después y 12 días antes de la fecha del abono.
+   cartolas le ponen los dos nombres al mismo hecho), en la moneda del abono y
+   con fecha de pago entre 6 días después y 12 días antes de la fecha del abono.
 2. El evento explica el abono si `MontoPorCuota × cuotas de la cuenta` da el
    monto abonado, con holgura de 0,5 % y un piso de 1 peso (o 0,5 dólares) por
    el redondeo de la cartola, **o** si la cartola trae el movimiento de títulos
-   del evento con el mismo monto por cuota que publica DataFondos.
-3. Si un solo fondo lo explica y el movimiento no traía instrumento, se le pone
-   ese nemotécnico. Si lo explican varios, o ninguno, el abono queda **dudoso**:
-   se informa en el reporte y la fila sale como caja, nunca con un fondo
-   inventado.
+   del evento con el mismo monto por cuota publicado.
+3. Si un solo instrumento lo explica y el movimiento no traía instrumento, se le
+   pone ese nemotécnico. Si lo explican varios, o ninguno, el abono queda
+   **dudoso**: se informa en el reporte y la fila sale como caja, nunca con un
+   instrumento inventado.
 4. Si el movimiento ya traía instrumento (Security, Larrainvial, o deducido por
    `dividendos.py`) y el monto cuadra, queda **confirmado** y entra como
-   cuadratura. Si para ese fondo hay un evento de la fecha y el monto no cuadra,
-   es una cuadratura que **no cierra**: la cartola y DataFondos se contradicen y
-   hay que mirarlo.
+   cuadratura. Si para ese instrumento hay un evento de la fecha y el monto no
+   cuadra, es una cuadratura que **no cierra**: la cartola y lo publicado se
+   contradicen y hay que mirarlo. Si no hay ningún evento de ese instrumento en
+   la fecha, queda **sin comprobar**: sale con el instrumento de la cartola y se
+   anota en el reporte.
 
 El paso 2 por monto por cuota impreso importa porque las cuotas del cierre no
 son siempre las que tenían derecho al reparto: si el cliente compró después de
 la fecha límite, `cuotas × monto` no da el abono, y el precio que imprime la
 cartola sí cuadra con el publicado.
 
-Las cuotas se suman por cuenta y nemotécnico, así que un fondo con varias
-posiciones en la misma cuenta se trata como una sola.
+Las cuotas se suman por cuenta y nemotécnico, así que un instrumento con varias
+posiciones en la misma cuenta se trata como uno solo.
 
-Los nemotécnicos se comparan sin guiones: un mismo fondo y serie se escribe
-`CFI-AMG3RE` o `CFIAMG3R-E`, el export de BICE usa los dos y DataFondos a veces
-publica solo uno.
+Los nemotécnicos se comparan sin guiones ni espacios: un mismo fondo y serie se
+escribe `CFI-AMG3RE` o `CFIAMG3R-E`, el export de BICE usa los dos, DataFondos a
+veces publica solo uno y la Bolsa pone uno en la columna de pesos y el otro en la
+de dólares.
 
 ## Agregar una institución nueva
 
@@ -146,51 +239,61 @@ monto por cuota, si los trae).
 
 ## Lo que no alcanza a cubrir
 
-- **Dividendos de acciones.** DataFondos publica los repartos de los fondos y
-  sigue solo 11 acciones, sin el monto por acción: los dividendos de acciones
-  quedan dudosos. Solo se consultan los nemotécnicos que empiezan con `CFI` o
-  `CFM`, que son los de fondos.
-- **Fondos que DataFondos no sigue.** Quedan dudosos y el detalle los nombra; no
-  se piden porque DataFondos no los tiene.
+- **Fondos que no se transan en la Bolsa y DataFondos no sigue.** Quedan
+  dudosos y el detalle los nombra.
+- **Disminuciones de capital por rescate de cuotas.** El fondo paga un precio
+  por cuota rescatada, no un monto por cada cuota en circulación, y la Bolsa no
+  las publica en la hoja de repartos: salen con el instrumento de la cartola y
+  quedan sin comprobar.
+- **Abonos anteriores a la tabla de la Bolsa.** La tabla guarda los pagos desde
+  el 1 de enero del año anterior al Excel; para cartolas más antiguas hay que
+  regenerarla con `--desde`.
 - **Dividendos reinvertidos.** No pasan por la caja, así que no hay abono que
   explicar; siguen apareciendo como aporte al fondo.
 
-## Resultado contra los datos anonimizados (08-10-2026)
+## Resultado contra los datos anonimizados (13-10-2026)
 
-Con las 480 cartolas BICE de septiembre de 2026 (`Cartolas BICE SFTP/202609`):
+Con el Excel de la Bolsa del 09-10-2026 y la tabla de DataFondos del 08-10-2026.
 
-| | Abonos |
-|---|---:|
-| Confirmados (instrumento y monto cuadran con el reparto publicado) | 585 |
-| Identificados con la tabla (no traían instrumento) | 5 |
-| Dudosos | 10 |
-| Contradicciones con la cartola | 0 |
+Las 480 cartolas BICE de septiembre de 2026 (`Cartolas BICE SFTP/202609`)
+tienen 606 abonos por eventos de capital:
 
-Comparada con el export de BICE del mismo período, la salida de los portafolios
-de AFI queda **idéntica** a la de antes de este cambio: los cinco abonos
-identificados son de portafolios que el export no trae. De los dos que el export
-sí permite comprobar en `Training Data` (`CFILBKA2-E` y `CFIAFOGAPA`), los dos
-coinciden con el instrumento del export.
+| | Solo DataFondos | Bolsa y DataFondos |
+|---|---:|---:|
+| Confirmados (instrumento y monto cuadran con el reparto publicado) | 585 | 591 |
+| Identificados con la tabla (no traían instrumento) | 5 | 12 |
+| Dudosos | 10 | 3 |
+| Por revisar (la cartola y lo publicado se contradicen) | 0 | 0 |
+| Con instrumento, sin un reparto publicado que los compruebe | 6 | 0 |
 
-Los 10 dudosos se buscaron uno por uno en DataFondos y ninguno se puede
-confirmar con lo que publica:
+Comparada con el export de BICE del mismo período, la salida cambia solo en
+`MOVIMIENTOS_DE_CAJA` y solo para mejor: los 3 abonos que antes salían como caja
+y el export trae con su instrumento (`LIPIGAS`, `MALLPLAZA` y `CFI-CARSGE`) ahora
+salen con ese instrumento y su producto. Ningún instrumento asignado difiere del
+export, y los otros 6 archivos quedan idénticos.
 
-| Dudosos | Por qué DataFondos no los explica |
+Los 3 dudosos que quedan no los explica ninguna fuente:
+
+| Dudosos | Por qué |
 |---:|---|
-| 4 | Dividendos de acciones (el export confirma dos: `LIPIGAS` y `MALLPLAZA`). DataFondos sigue solo 11 acciones y ninguna de estas; `CHILE`, que sí sigue, no pagó dividendo en septiembre |
-| 4 | Los fondos de la cuenta que podrían pagarlos no están en DataFondos (`CFI-CARSGE`, que es el que dice el export, `CFISDA5F-E`, `CFIBCIRFCL`, `CFIVNTFIIV`) o están sin repartos ese mes (`CFIBTGPLAA`, `CFILCEUP-E`) |
-| 2 | Dividendos en dólares del mismo día en dos cuentas, que no cuadran con ningún reparto publicado de los fondos de la cuenta. El único fondo de esas cuentas sin repartos en la tabla es `CFI-ANM7AE`, que DataFondos sigue sin ningún reparto publicado |
+| 2 | Dividendos en dólares del mismo día en dos cuentas cuyos fondos no tienen reparto publicado en la fecha; la otra posición es `IBIT`, que no publica la Bolsa |
+| 1 | Dividendo en pesos de una cuenta con `CFIBCIRFCL`, que no publican ni la Bolsa ni DataFondos, y `CFIVNTFIIV`, cuyos dividendos mensuales se pagaron el 03-09 y el 06-10 |
 
-Con la cobertura, la skill llega sola a esa misma revisión: los 10 quedan con la
-causa "DataFondos no tiene un reparto que lo pague", ninguno por consultar, y el
-detalle de cada uno nombra las acciones, los fondos que DataFondos no sigue y
-los que no tienen reparto en la fecha.
+Con las 59 cartolas de `Training Data`, por formato:
 
-Con las 59 cartolas de `Training Data` (los 6 formatos): 102 abonos confirmados
-y 5 identificados, 5 dudosos y ninguna contradicción. Los 5 identificados son 2
-de BICE nueva —que con solo 20 cartolas del mes no se pueden deducir comparando
-clientes— y 3 de Sura, que no traen instrumento y antes salían como caja. Los 5
-dudosos son de Sura: 3 de una cuenta con acciones y un fondo con un reparto en
-la fecha que no da el monto ("Ningún reparto publicado cuadra con el monto") y 2
-de fondos que DataFondos sigue sin un reparto en la fecha ("DataFondos no tiene
-un reparto que lo pague").
+| Formato | Abonos | Confirmados | Identificados | Dudosos | Sin comprobar | Por revisar |
+|---|---:|---:|---:|---:|---:|---:|
+| BICE nueva | 23 | 21 | 2 | 0 | 0 | 0 |
+| BICE antigua | 4 | 4 (antes 3) | 0 | 0 | 0 | 0 |
+| Valores Security | 89 | 89 (antes 77) | 0 | 0 | 0 | 0 |
+| Larrainvial | 2 | 1 | 0 | 0 | 1 | 0 |
+| Sura | 8 | 0 | 3 | 5 | 0 | 0 |
+| Pershing | 0 | | | | | |
+
+El abono sin comprobar de Larrainvial es una disminución de capital por rescate
+de cuotas, que la Bolsa no publica. Los 5 dudosos de Sura siguen como antes: 3
+de una cuenta con un fondo que tiene un reparto en la fecha que no da el monto y
+dos acciones sin dividendo en la fecha ("Ningún reparto publicado cuadra con el
+monto"), y 2 de fondos sin reparto en la fecha ("Ni la Bolsa ni DataFondos
+publican un reparto que lo pague"). Los archivos de salida de `Training Data`
+quedan idénticos a los de antes de la Bolsa.

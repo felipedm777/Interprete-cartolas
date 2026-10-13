@@ -1,4 +1,6 @@
 # Lectura de PDF con coordenadas (enfoque recomendado en docs/inventario.md)
 pymupdf>=1.23
+# Lectura del Excel de dividendos y repartos de la Bolsa (cartolas.bolsa)
+openpyxl>=3.1
 # Pruebas
 pytest>=8
