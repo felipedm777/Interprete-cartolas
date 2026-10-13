@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pymupdf
 
-from . import dividendos, eventos_capital
+from . import bolsa, dividendos, eventos_capital
 from .catalogo import Catalogo
 from .exportar import escribir
 from .extractores import detectar
@@ -82,7 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         "--eventos-capital",
         help="tabla de dividendos y repartos de DataFondos para identificar y comprobar los abonos "
         f"por eventos de capital (por defecto, {eventos_capital.RUTA_TABLA.name} de la skill; "
-        "'no' para no usar ninguna)",
+        "'no' para no usar ninguna, ni la de la Bolsa)",
+    )
+    parser.add_argument(
+        "--bolsa",
+        help="tabla de dividendos y repartos de la Bolsa (CSV de `python -m cartolas.bolsa` o el Excel "
+        "de la Bolsa; por defecto, la más reciente de la skill; 'no' para no usarla)",
     )
     args = parser.parse_args(argv)
 
@@ -98,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     _completar_euro(resultados, leer_monto(args.tipo_cambio_eur) if args.tipo_cambio_eur else None)
     catalogo = Catalogo.cargar()
     dividendos.inferir(cartolas, catalogo)
-    tabla = _tabla_eventos(args.eventos_capital, parser)
+    tabla = _tabla_eventos(args.eventos_capital, args.bolsa, parser)
     cobertura = _cobertura(args.eventos_capital, parser)
     conciliacion = eventos_capital.conciliar(cartolas, catalogo, tabla, cobertura)
     for r in resultados:
@@ -141,10 +146,15 @@ def main(argv: list[str] | None = None) -> int:
         filas = ", ".join(f"{tipo} {len(total.filas.get(tipo, []))}" for tipo in ARCHIVOS)
         print(f"  {nombre} al {fecha}: {filas}")
     print(
-        f"Eventos de capital con DataFondos: {conciliacion.confirmados} confirmados, "
+        f"Eventos de capital (Bolsa y DataFondos): {conciliacion.confirmados} confirmados, "
         f"{conciliacion.asignados} identificados, {len(conciliacion.dudosos)} dudosos, "
         f"{len(conciliacion.revisar)} por revisar."
     )
+    if conciliacion.causas[eventos_capital.POR_BAJAR]:
+        print(
+            f"  {conciliacion.causas[eventos_capital.POR_BAJAR]} abonos necesitan un Excel de la Bolsa más "
+            "nuevo: bajarlo con `python -m cartolas.bolsa` y volver a correr."
+        )
     if conciliacion.pendientes:
         fondos = len({nemo for nemo, _ in conciliacion.pendientes})
         print(f"  {fondos} fondos por consultar en DataFondos: ver \"Eventos de capital\" en el reporte.")
@@ -162,17 +172,29 @@ def _cobertura(opcion: str | None, parser: argparse.ArgumentParser) -> eventos_c
         parser.error(f"no se pudo leer la cobertura de DataFondos: {e}")
 
 
-def _tabla_eventos(opcion: str | None, parser: argparse.ArgumentParser) -> eventos_capital.Tabla:
-    """Tabla de eventos de capital indicada, la de la skill, o una vacía."""
+def _tabla_eventos(
+    opcion: str | None, opcion_bolsa: str | None, parser: argparse.ArgumentParser
+) -> eventos_capital.Tabla:
+    """Tablas de eventos de capital de DataFondos y de la Bolsa indicadas, las
+    de la skill, o una vacía."""
     if opcion and opcion.lower() == "no":
         return eventos_capital.Tabla([])
     ruta = Path(opcion) if opcion else eventos_capital.RUTA_TABLA
     if opcion and not ruta.exists():
         parser.error(f"no existe la tabla de eventos de capital {ruta}")
     try:
-        return eventos_capital.Tabla.cargar(ruta)
+        datafondos = eventos_capital.Tabla.cargar(ruta)
     except (ValueError, OSError) as e:
         parser.error(f"no se pudo leer la tabla de eventos de capital: {e}")
+    if opcion_bolsa and opcion_bolsa.lower() == "no":
+        return datafondos
+    ruta_bolsa = Path(opcion_bolsa) if opcion_bolsa else None
+    if ruta_bolsa and not ruta_bolsa.exists():
+        parser.error(f"no existe la tabla de la Bolsa {ruta_bolsa}")
+    try:
+        return eventos_capital.Tabla.unir(bolsa.cargar(ruta_bolsa), datafondos)
+    except (RuntimeError, ValueError, OSError) as e:
+        parser.error(f"no se pudo leer la tabla de la Bolsa: {e}")
 
 
 def _extraer(archivos: list[Path]) -> list[Resultado]:
@@ -334,17 +356,28 @@ def _reporte_eventos(
     conciliacion: eventos_capital.Conciliacion,
     cobertura: eventos_capital.Cobertura,
 ) -> list[str]:
-    """Qué explicó la tabla de DataFondos, por qué quedaron los dudosos y qué
-    hay que consultar."""
-    lineas = ["", "## Eventos de capital (DataFondos)", ""]
+    """Qué explicaron las tablas de la Bolsa y de DataFondos, por qué quedaron
+    los dudosos y qué hay que actualizar o consultar."""
+    lineas = ["", "## Eventos de capital (Bolsa y DataFondos)", ""]
     if not len(tabla):
         lineas.append("- Sin tabla de eventos: los abonos por dividendos y repartos no se comprobaron.")
         return lineas
-    periodo = tabla.periodo()
-    lineas.append(
-        f"- Tabla: {len(tabla)} eventos"
-        + (f", pagos del {periodo[0]:%d-%m-%Y} al {periodo[1]:%d-%m-%Y}" if periodo else "")
-    )
+    fuentes = ((eventos_capital.BOLSA, "la Bolsa de Santiago"), (eventos_capital.DATAFONDOS, "DataFondos"))
+    for fuente, nombre in fuentes:
+        eventos = tabla.de(fuente)
+        periodo = tabla.periodo(fuente)
+        excel = (
+            f" del Excel del {tabla.bolsa_al:%d-%m-%Y}"
+            if fuente == eventos_capital.BOLSA and tabla.bolsa_al
+            else ""
+        )
+        lineas.append(
+            f"- Tabla de {nombre}: {len(eventos)} eventos{excel}"
+            + (f", pagos del {periodo[0]:%d-%m-%Y} al {periodo[1]:%d-%m-%Y}" if periodo else "")
+            if eventos
+            else f"- Sin tabla de {nombre}."
+            + (" Bajarla con `python -m cartolas.bolsa`." if fuente == eventos_capital.BOLSA else "")
+        )
     actualizada = cobertura.actualizada()
     lineas.append(
         f"- Cobertura de DataFondos: {len(cobertura)} fondos y series"
@@ -360,6 +393,16 @@ def _reporte_eventos(
         if conciliacion.causas[causa]:
             lineas.append(f"  - {causa}: {conciliacion.causas[causa]}")
     lineas.append(f"- Abonos por revisar: {len(conciliacion.revisar)}")
+    lineas.append(
+        f"- Abonos que traen su instrumento sin un reparto publicado que los pague: "
+        f"{len(conciliacion.sin_comprobar)}"
+    )
+    if conciliacion.causas[eventos_capital.POR_BAJAR]:
+        lineas += [
+            "",
+            "Hay abonos que necesitan un Excel de la Bolsa más nuevo que el de la tabla: bajarlo con "
+            "`python -m cartolas.bolsa` y volver a correr la skill.",
+        ]
     if conciliacion.pendientes:
         lineas += [
             "",

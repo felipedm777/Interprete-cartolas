@@ -1,4 +1,4 @@
-"""Identificación y comprobación de los abonos por eventos de capital con DataFondos."""
+"""Identificación y comprobación de los abonos por eventos de capital con la Bolsa y DataFondos."""
 
 import json
 from datetime import date
@@ -92,9 +92,10 @@ def test_lo_que_la_tabla_no_explica_queda_dudoso_y_sin_instrumento():
     c = _cartola([("ACCION", 100)], [("PAGO DE DIVIDENDOS", 3000, CIERRE, "")])
     resultado = ec.conciliar([c], CATALOGO, TABLA)
     assert c.movimientos_caja[0].instrumento == ""
-    assert len(resultado.dudosos) == 1 and "acciones u otros instrumentos" in resultado.dudosos[0]
-    assert resultado.causas == {ec.SIN_REPARTO: 1}
-    # DataFondos publica los repartos de los fondos: una acción no se le consulta.
+    # Los dividendos de las acciones los publica la Bolsa, y la tabla no la trae.
+    assert len(resultado.dudosos) == 1 and "por bajar el Excel de la Bolsa: ACC" in resultado.dudosos[0]
+    assert resultado.causas == {ec.POR_BAJAR: 1}
+    # DataFondos sigue solo fondos: una acción no se le consulta.
     assert resultado.pendientes == set()
 
 
@@ -154,6 +155,17 @@ def test_encuentra_el_fondo_aunque_el_guion_vaya_en_otro_lugar():
     resultado = ec.conciliar([c], catalogo, tabla)
     assert c.movimientos_caja[0].instrumento == "CFI-CCCE"
     assert resultado.asignados == 1 and resultado.pendientes == set()
+
+
+def test_un_abono_con_instrumento_sin_reparto_publicado_queda_sin_comprobar():
+    c = _cartola([("FONDO A", 100)], [("DIVIDENDO EN PESOS", 250, date(2026, 8, 10), "CFI-A")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    assert (resultado.confirmados, resultado.revisar, resultado.dudosos) == (0, [], [])
+    assert resultado.sin_comprobar == [
+        "DIVIDENDO EN PESOS CLP del 10-08-2026 va con CFI-A: sin reparto publicado en la fecha"
+    ]
+    assert c.movimientos_caja[0].instrumento == "CFI-A"
+    assert any(a.startswith("Abono sin comprobar") for a in c.avisos)
 
 
 def test_sin_tabla_no_cambia_nada():
@@ -246,7 +258,7 @@ def test_con_la_cobertura_un_fondo_que_datafondos_no_sigue_no_queda_por_consulta
     resultado = ec.conciliar([c], CATALOGO, sin_a, ec.Cobertura(COBERTURA.seguidos[1:]))
     assert resultado.pendientes == set()
     assert resultado.causas == {ec.SIN_REPARTO: 1}
-    assert "fondos que DataFondos no sigue: CFI-A" in resultado.dudosos[0]
+    assert "fondos que no siguen ni la Bolsa ni DataFondos: CFI-A" in resultado.dudosos[0]
 
 
 def test_un_fondo_con_repartos_mas_nuevos_que_la_tabla_queda_por_consultar():
@@ -268,13 +280,21 @@ def test_un_fondo_al_dia_sin_reparto_en_la_fecha_no_queda_por_consultar():
     c = _cartola([("FONDO B", 30)], [("DIVIDENDO EN PESOS", 120, date(2026, 8, 10), "")])
     resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
     assert resultado.pendientes == set()
-    assert "fondos sin reparto publicado en la fecha: CFI-B" in resultado.dudosos[0]
+    assert "sin reparto publicado en la fecha: CFI-B" in resultado.dudosos[0]
 
 
 def test_ningun_reparto_publicado_cuadra():
     c = _cartola([("FONDO B", 30), ("ACCION", 10)], [("DIVIDENDO EN PESOS", 999, CIERRE, "")])
-    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    # Con el Excel de la Bolsa al día, que no publica nada de la acción.
+    resultado = ec.conciliar([c], CATALOGO, ec.Tabla(TABLA.eventos, date(2026, 10, 9)), COBERTURA)
     assert resultado.causas == {ec.NO_CUADRA: 1}
+    assert "acciones u otros instrumentos que la Bolsa no publica: ACC" in resultado.dudosos[0]
+
+
+def test_sin_la_tabla_de_la_bolsa_una_accion_pide_bajarla():
+    c = _cartola([("FONDO B", 30), ("ACCION", 10)], [("DIVIDENDO EN PESOS", 999, CIERRE, "")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA, COBERTURA)
+    assert resultado.causas == {ec.POR_BAJAR: 1}
 
 
 def test_agrega_la_cobertura_que_devuelve_resumen_dividendos(tmp_path):
