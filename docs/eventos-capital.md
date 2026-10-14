@@ -30,7 +30,7 @@ DataFondos.
 | | Bolsa de Santiago | DataFondos |
 |---|---|---|
 | Qué publica | Dividendos y repartos de acciones nacionales, fondos de inversión (CFI y CFM) y emisores extranjeros que se transan en la Bolsa | Repartos de unos 134 fondos y series, y la fecha de 11 acciones sin el monto |
-| Cómo se obtiene | Un Excel acumulado que la Bolsa publica cada día hábil; `python -m cartolas.bolsa` lo baja y lo lee | Fondo por fondo con el MCP (`dividendos`), más `resumen_dividendos` para saber qué fondos sigue |
+| Cómo se obtiene | Un Excel acumulado que la Bolsa publica cada día hábil; la corrida lo baja si la tabla es anterior al último cierre, o `python -m cartolas.bolsa` | Por la API de DataFondosv2 (`/api/v1`, la misma del MCP): `resumen_dividendos` para saber qué fondos sigue y `dividendos` fondo por fondo. La corrida la consulta sola con `DATAFONDOS_API_URL` y `DATAFONDOS_API_KEY`; sin ellas, por el MCP |
 | Tabla de la skill | `datos/eventos_bolsa_<AAAAMMDD>.csv`, con la fecha del Excel | `datos/eventos_capital.csv` y `datos/datafondos_cobertura.csv` |
 | Para qué sirve | La fuente principal: cubre casi todo lo que traen las cartolas | Los fondos que la Bolsa no publica, y los eventos que se informaron pero no pagaron dinero (`Anulado`) |
 
@@ -137,6 +137,38 @@ esa fecha; los que la tabla ya tenía se mantienen.
 La tabla del repositorio se armó el 08-10-2026 con los 56 fondos que aparecen en
 las cartolas anonimizadas, desde agosto de 2025: 289 eventos.
 
+### La consulta a la API de DataFondos
+
+DataFondos es el repositorio DataFondosv2. Su MCP es una capa delgada sobre su
+API de solo lectura: `resumen_dividendos` es `GET /api/v1/dividendos/resumen` y
+`dividendos` es `GET /api/v1/fondos/{rut}/dividendos?nemo=`, con la misma
+respuesta (`{"ok": true, "data": [...]}`). Por eso `datafondos.py` lee las
+respuestas de la API con el mismo código que las del MCP.
+
+Con `DATAFONDOS_API_URL` y `DATAFONDOS_API_KEY` en el entorno (una key nominal
+con el scope `valores:read`), cada corrida, antes de conciliar:
+
+1. pide el resumen y actualiza la cobertura;
+2. calcula, sin tocar las cartolas, qué fondos pediría consultar la
+   conciliación (`eventos_capital.pendientes`);
+3. pide `dividendos` de cada uno con el RUT y el nemotécnico con que DataFondos
+   lo lista, y agrega a la tabla los repartos pagados desde el 1 de enero del
+   año anterior (o desde el inicio de las cartolas, si es antes);
+4. concilia con la tabla actualizada.
+
+Las respuestas quedan en `<carpeta de salida>/datafondos/`. Una falla (sin red,
+key inválida o sin permiso, límite de consultas) no detiene la corrida: queda
+en el reporte y se concilia con las tablas que había. `python -m
+cartolas.datafondos` hace lo mismo a mano: sin argumentos actualiza la
+cobertura y comprueba la conexión; con `--fondo RUT NEMOTECNICO` agrega los
+repartos de esos fondos.
+
+Probado con una API simulada que sirve la tabla del repositorio: con la tabla
+sin los repartos pagados desde julio de 2026, la corrida de las 480 cartolas
+BICE de septiembre consultó 12 fondos, agregó 42 repartos y dio el mismo
+resultado que con la tabla completa (585 confirmados, 5 identificados, 10
+dudosos sin la tabla de la Bolsa) y los mismos archivos.
+
 ### La cobertura de DataFondos
 
 `skill/cartolas/datos/datafondos_cobertura.csv` guarda lo que devuelve
@@ -148,8 +180,9 @@ Nemotecnico;RutFondo;Serie;Nombre;Eventos;UltimaFecha;Actualizado
 CFIAMG3R-E;9879;R;AMERIS NM P CREDIT;51;2026-10-07;2026-10-07
 ```
 
-Se actualiza con el mismo comando: reconoce sola una respuesta de
-`resumen_dividendos` y la guarda en la cobertura en vez de la tabla. La que trae
+La corrida la actualiza desde la API. Por el MCP, se actualiza con el mismo
+comando de la tabla: reconoce sola una respuesta de `resumen_dividendos` y la
+guarda en la cobertura en vez de la tabla. La que trae
 la skill es del 08-10-2026, con 134 fondos y series.
 
 ## Qué se sabe de cada instrumento de la cuenta

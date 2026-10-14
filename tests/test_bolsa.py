@@ -268,3 +268,24 @@ def test_un_monto_muy_chico_se_escribe_y_se_vuelve_a_leer(tmp_path):
     ruta = tmp_path / "eventos_bolsa_20260920.csv"
     ec.escribir([evento], ruta)
     assert bolsa.cargar(ruta).eventos[0].monto_por_cuota == D("0.0000001")
+
+
+def test_actualiza_la_tabla_de_la_skill_con_el_excel_mas_reciente(tmp_path, monkeypatch):
+    excel = _excel(tmp_path / "20260920.xlsx")
+    monkeypatch.setattr(bolsa, "descargar", lambda carpeta, hasta=None: excel)
+    datos = tmp_path / "datos"
+    datos.mkdir()
+    assert bolsa.fecha_vigente(datos) is None
+    ruta, lectura = bolsa.actualizar(tmp_path / "bajados", datos)
+    assert ruta == datos / "eventos_bolsa_20260920.csv" and lectura.al == date(2026, 9, 20)
+    assert bolsa.fecha_vigente(datos) == date(2026, 9, 20)
+    # Guarda desde el 1 de enero del año anterior al Excel.
+    assert bolsa.cargar(ruta).periodo() == (date(2026, 9, 14), date(2026, 9, 15))
+
+
+def test_actualizar_avisa_si_no_puede_leer_el_excel(tmp_path, monkeypatch):
+    malo = tmp_path / "20260920.xlsx"
+    malo.write_bytes(b"no es un excel")
+    monkeypatch.setattr(bolsa, "descargar", lambda carpeta, hasta=None: malo)
+    with pytest.raises(RuntimeError):
+        bolsa.actualizar(tmp_path / "bajados", tmp_path)

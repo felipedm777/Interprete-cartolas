@@ -11,13 +11,13 @@ import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pymupdf
 
-from . import bolsa, dividendos, eventos_capital
+from . import bolsa, datafondos, dividendos, eventos_capital
 from .catalogo import Catalogo
 from .exportar import escribir
 from .extractores import detectar
@@ -89,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
         help="tabla de dividendos y repartos de la Bolsa (CSV de `python -m cartolas.bolsa` o el Excel "
         "de la Bolsa; por defecto, la más reciente de la skill; 'no' para no usarla)",
     )
+    parser.add_argument(
+        "--sin-internet",
+        action="store_true",
+        help="no bajar el Excel de la Bolsa ni consultar DataFondos: usar las tablas de la skill como "
+        "están",
+    )
     args = parser.parse_args(argv)
 
     archivos = _pdfs(args.entradas)
@@ -103,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     _completar_euro(resultados, leer_monto(args.tipo_cambio_eur) if args.tipo_cambio_eur else None)
     catalogo = Catalogo.cargar()
     dividendos.inferir(cartolas, catalogo)
+    carpeta = Path(args.salida)
+    actualizacion = _actualizar_tablas(args, cartolas, catalogo, carpeta, parser)
     tabla = _tabla_eventos(args.eventos_capital, args.bolsa, parser)
     cobertura = _cobertura(args.eventos_capital, parser)
     conciliacion = eventos_capital.conciliar(cartolas, catalogo, tabla, cobertura)
@@ -116,7 +124,6 @@ def main(argv: list[str] | None = None) -> int:
     for r in resultados:
         if r.cartola:
             juegos[codigo if r.cartola.institucion == "BICE" else r.cartola.institucion].append(r)
-    carpeta = Path(args.salida)
     carpeta.mkdir(parents=True, exist_ok=True)
     resumen = []
     for nombre, parte in juegos.items():
@@ -133,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     nombres = "_".join(n for n, _, _ in resumen) or codigo
     reporte = carpeta / f"REPORTE_{nombres}_{fecha_reporte.replace('-', '')}.md"
-    reporte.write_text(_reporte(resultados, resumen, tabla, conciliacion, cobertura), encoding="utf-8")
+    reporte.write_text(
+        _reporte(resultados, resumen, tabla, conciliacion, cobertura, actualizacion), encoding="utf-8"
+    )
 
     sin_cuadrar = sum(1 for c in cartolas if not all(x.ok for x in c.controles))
     fallidos = sum(1 for r in resultados if r.error and not r.duplicado)
@@ -145,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     for nombre, fecha, total in resumen:
         filas = ", ".join(f"{tipo} {len(total.filas.get(tipo, []))}" for tipo in ARCHIVOS)
         print(f"  {nombre} al {fecha}: {filas}")
+    for linea in actualizacion:
+        print(linea)
     print(
         f"Eventos de capital (Bolsa y DataFondos): {conciliacion.confirmados} confirmados, "
         f"{conciliacion.asignados} identificados, {len(conciliacion.dudosos)} dudosos, "
@@ -162,12 +173,97 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if sin_cuadrar or fallidos else 0
 
 
+def _actualizar_tablas(
+    args: argparse.Namespace,
+    cartolas: list[Cartola],
+    catalogo: Catalogo,
+    carpeta: Path,
+    parser: argparse.ArgumentParser,
+) -> list[str]:
+    """Pone al día las tablas de eventos de capital de la skill antes de
+    conciliar: baja el Excel de la Bolsa si la tabla es anterior al último
+    cierre de las cartolas y, con la API de DataFondos configurada, actualiza la
+    cobertura y agrega los repartos de los fondos que faltan. Si algo falla se
+    sigue con las tablas como están. Devuelve qué se hizo, para el reporte.
+
+    Solo se actualizan las tablas de la skill: no las que se indican con
+    `--bolsa` o `--eventos-capital`."""
+    if args.sin_internet or not cartolas or (args.eventos_capital or "").lower() == "no":
+        return []
+    lineas = []
+    if args.bolsa is None:
+        lineas += _actualizar_bolsa(carpeta / "bolsa", max(c.hasta for c in cartolas))
+    if args.eventos_capital is None:
+        lineas += _actualizar_datafondos(args, cartolas, catalogo, carpeta / "datafondos", parser)
+    return lineas
+
+
+def _actualizar_bolsa(carpeta: Path, cierre: date) -> list[str]:
+    """Baja el Excel de la Bolsa si la tabla de la skill no cubre los abonos
+    hasta el último cierre: el Excel trae lo publicado hasta su fecha."""
+    al = bolsa.fecha_vigente()
+    if al and al >= cierre:
+        return []
+    try:
+        ruta, lectura = bolsa.actualizar(carpeta)
+    except RuntimeError as e:
+        sigue = f"se usó la tabla del Excel del {al:%d-%m-%Y}" if al else "se siguió sin tabla de la Bolsa"
+        return [f"No se pudo bajar el Excel de la Bolsa ({e}): {sigue}."]
+    return [
+        f"Se bajó el Excel de la Bolsa del {lectura.al:%d-%m-%Y} y se actualizó la tabla de la skill "
+        f"({ruta.name})."
+    ]
+
+
+def _actualizar_datafondos(
+    args: argparse.Namespace,
+    cartolas: list[Cartola],
+    catalogo: Catalogo,
+    carpeta: Path,
+    parser: argparse.ArgumentParser,
+) -> list[str]:
+    """Con la API de DataFondos configurada, actualiza la cobertura y consulta
+    los fondos que la conciliación pediría consultar. Las respuestas quedan en
+    `carpeta`. A DataFondos solo van el RUT y el nemotécnico de los fondos."""
+    try:
+        cliente = datafondos.desde_entorno()
+    except datafondos.DataFondosError as e:
+        return [f"No se consultó DataFondos: {e}."]
+    if cliente is None:
+        return [
+            f"No se consultó DataFondos: faltan las variables {datafondos.VARIABLE_URL} y "
+            f"{datafondos.VARIABLE_KEY} (ver README)."
+        ]
+    try:
+        cobertura = datafondos.actualizar_cobertura(cliente, eventos_capital.RUTA_COBERTURA, carpeta)
+    except datafondos.DataFondosError as e:
+        return [f"No se pudo consultar DataFondos ({e}): se usaron la tabla y la cobertura de la skill."]
+    lineas = [
+        f"Se actualizó desde DataFondos la cobertura de la skill: {len(cobertura)} fondos y series."
+    ]
+    tabla = _tabla_eventos(args.eventos_capital, args.bolsa, parser)
+    pendientes = eventos_capital.pendientes(cartolas, catalogo, tabla, cobertura)
+    fondos, sin_rut = datafondos.fondos_por_consultar(pendientes, cobertura)
+    if fondos:
+        hoy = date.today()
+        desde = min([date(hoy.year - 1, 1, 1)] + [c.desde - timedelta(days=31) for c in cartolas])
+        consulta = datafondos.consultar(cliente, fondos, eventos_capital.RUTA_TABLA, desde, carpeta)
+        lineas.append(
+            f"Se consultaron {len(consulta.consultados)} fondos en DataFondos: {consulta.agregados} "
+            "repartos nuevos en la tabla de la skill."
+        )
+        lineas += [f"No se pudo consultar {falla}." for falla in consulta.fallas]
+    if sin_rut:
+        lineas.append(f"Fondos por consultar que DataFondos no lista en su resumen: {', '.join(sin_rut)}.")
+    return lineas
+
+
 def _cobertura(opcion: str | None, parser: argparse.ArgumentParser) -> eventos_capital.Cobertura:
     """Qué fondos sigue DataFondos: la cobertura de la skill, salvo con `--eventos-capital no`."""
     if opcion and opcion.lower() == "no":
         return eventos_capital.Cobertura([])
     try:
-        return eventos_capital.Cobertura.cargar()
+        return eventos_capital.Cobertura.cargar(eventos_capital.RUTA_COBERTURA)
     except (OSError, ValueError) as e:
         parser.error(f"no se pudo leer la cobertura de DataFondos: {e}")
 
@@ -311,6 +407,7 @@ def _reporte(
     tabla: eventos_capital.Tabla | None = None,
     conciliacion: eventos_capital.Conciliacion | None = None,
     cobertura: eventos_capital.Cobertura | None = None,
+    actualizacion: list[str] | None = None,
 ) -> str:
     lineas = ["# Reporte de extracción", ""]
     lineas += [
@@ -335,7 +432,9 @@ def _reporte(
         for tipo in ARCHIVOS:
             lineas.append(f"  - {tipo}: {len(total.filas.get(tipo, []))}")
     if conciliacion is not None and tabla is not None:
-        lineas += _reporte_eventos(tabla, conciliacion, cobertura or eventos_capital.Cobertura([]))
+        lineas += _reporte_eventos(
+            tabla, conciliacion, cobertura or eventos_capital.Cobertura([]), actualizacion or []
+        )
     for r in resultados:
         c, s = r.cartola, r.salida
         if c is None:
@@ -355,10 +454,12 @@ def _reporte_eventos(
     tabla: eventos_capital.Tabla,
     conciliacion: eventos_capital.Conciliacion,
     cobertura: eventos_capital.Cobertura,
+    actualizacion: list[str] = (),
 ) -> list[str]:
     """Qué explicaron las tablas de la Bolsa y de DataFondos, por qué quedaron
     los dudosos y qué hay que actualizar o consultar."""
     lineas = ["", "## Eventos de capital (Bolsa y DataFondos)", ""]
+    lineas += [f"- {linea}" for linea in actualizacion]
     if not len(tabla):
         lineas.append("- Sin tabla de eventos: los abonos por dividendos y repartos no se comprobaron.")
         return lineas
