@@ -39,8 +39,8 @@ def _posicion(cuenta, tabla, instrumento, moneda, cantidad, precio, valor_clp, s
 def _cartola() -> Cartola:
     c = Cartola("prueba", "x.pdf", "1-9", "", date(2026, 1, 1), date(2026, 1, 31), TC)
     c.cuentas = {
-        "0": Cuenta("0", "PORTAFOLIO N° 1 - AFITRADING ASESORIA FINANCIERA - S", "Cuenta de Inversión"),
-        "90": Cuenta("90", "PORTAFOLIO N° 1 - AFITRADING ASESORIA FINANCIERA - DAPV-B-S", "APV Prime"),
+        "0": Cuenta("0", "PORTAFOLIO N° 1 - ASESORA EJEMPLO - S", "Cuenta de Inversión"),
+        "90": Cuenta("90", "PORTAFOLIO N° 1 - ASESORA EJEMPLO - DAPV-B-S", "APV Prime"),
         "1": Cuenta("1", "PORTAFOLIO N° 2", "Cuenta de Inversión"),
         "EXT1": Cuenta("EXT1", "PORTAFOLIO N° 1 - EXT1", "Mercado Internacional Pershing"),
     }
@@ -134,10 +134,12 @@ def test_posiciones():
     assert any("Intermediación Financiera" in o for o in s.omitidos)
 
 
-def test_solo_afi():
-    s = generar(_cartola(), CATALOGO, solo_afi=True)
-    assert all("AFITRADING" in f["Portafolio"] for filas in s.filas.values() for f in filas)
-    assert any("no es de AFI Trading" in o for o in s.omitidos)
+def test_solo_un_portafolio():
+    s = generar(_cartola(), CATALOGO, portafolio="asesora ejemplo")
+    assert all("ASESORA EJEMPLO" in f["Portafolio"] for filas in s.filas.values() for f in filas)
+    assert any("no contiene «asesora ejemplo»" in o for o in s.omitidos)
+    todas = generar(_cartola(), CATALOGO)
+    assert sum(map(len, todas.filas.values())) > sum(map(len, s.filas.values()))
 
 
 def test_movimientos():

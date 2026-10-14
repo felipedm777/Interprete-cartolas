@@ -304,7 +304,7 @@ No se vieron en estas muestras: fondos mutuos, depósitos a plazo o CD, opciones
 
 ## 5. Mapeo al formato de Example
 
-El Example Export es de BICE (portafolio 10038) y **no trae ninguna fila Pershing**. `MOVIMIENTOS_PERSHING` solo tiene encabezado: utf-8 sin BOM, CRLF, `;`. Tampoco hay filas Pershing en `CUSTODIA_ACCIONES`, `SALDOS_*` ni `MOVIMIENTOS_DE_CAJA`, así que **varias decisiones de mapeo no se pueden inferir del ejemplo** y hay que preguntarlas (marcadas con ❓).
+El Example Export es de BICE (portafolio <código>) y **no trae ninguna fila Pershing**. `MOVIMIENTOS_PERSHING` solo tiene encabezado: utf-8 sin BOM, CRLF, `;`. Tampoco hay filas Pershing en `CUSTODIA_ACCIONES`, `SALDOS_*` ni `MOVIMIENTOS_DE_CAJA`, así que **varias decisiones de mapeo no se pueden inferir del ejemplo** y hay que preguntarlas (marcadas con ❓).
 
 Conversión de formato, común a todos los destinos:
 
@@ -320,7 +320,7 @@ Conversión de formato, común a todos los destinos:
 | RutCliente | **Sin fuente.** Pershing no imprime RUT. Requiere una tabla maestra `CuentaPershing → RUT`. El titular BICE tiene el mismo nombre ficticio que un cliente de las cartolas Larrainvial, así que un cruce por nombre es posible pero frágil |
 | Cuenta | **Sin fuente** (en el ejemplo es la subcuenta interna BICE: 0, 1, 90…). ❓ |
 | CuentaPershing | `Número de Cuenta:` (p1 arriba a la derecha y pie de cada página). ❓ con o sin guion |
-| Portafolio | **Sin fuente** (nombre de portafolio AFITRADING; tabla maestra) |
+| Portafolio | **Sin fuente** (nombre de portafolio de la asesora; tabla maestra) |
 | ProductoBase | **Sin fuente.** Probablemente constante (¿`CUENTA INVERSION`?). ❓ |
 | Producto | Derivable de la clase del instrumento en Tenencias (Acciones, Productos Negociados en Bolsa, Money Market, Bonos), cruzando por CUSIP o código. ❓ vocabulario (¿`ACCIONES`/`ETF` como en CUSTODIA?) |
 | Instrumento | `Descripción` (línea 1 + continuación de la línea 2) |

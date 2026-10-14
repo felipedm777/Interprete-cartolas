@@ -12,7 +12,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 Desde la carpeta de esta skill (la que contiene `cartolas/`; en el repositorio, `skill/`), con Python y `pymupdf`:
 
 ```
-python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo 10038] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109] [--eventos-capital <tabla.csv>] [--bolsa <tabla.csv o Excel>] [--sin-internet]
+python -m cartolas <PDF o carpetas>... --salida <carpeta> [--portafolio <texto>] [--codigo <código>] [--fecha AAAA-MM-DD] [--tipo-cambio-eur 1102,72109] [--eventos-capital <tabla.csv>] [--bolsa <tabla.csv o Excel>] [--sin-internet]
 ```
 
 - Escribe un juego de 7 archivos por institución: `SALDOS_CAJA`, `SALDOS_FFMM`, `CUSTODIA_ACCIONES`, `MOVIMIENTOS_DE_CAJA`, `MOVIMIENTOS_BOLSA`, `MOVIMIENTOS_FFMM` y `MOVIMIENTOS_PERSHING`. Los de BICE se llaman `<ARCHIVO>_<código>_<AAAAMMDD>_V2.csv` y los de otras instituciones `<ARCHIVO>_<INSTITUCIÓN>_<AAAAMMDD>_V2.csv` (p. ej. `SALDOS_CAJA_SECURITY_20260430_V2.csv`). Además deja un `REPORTE_<juegos>_<AAAAMMDD>.md`.
@@ -23,7 +23,7 @@ python -m cartolas <PDF o carpetas>... --salida <carpeta> [--solo-afi] [--codigo
 - Los dividendos y repartos de la cartola BICE nueva no dicen de qué instrumento son: si el monto por cuota cuadra con el de otro cliente el mismo día, o si la cuenta tiene una sola posición que pueda pagarlos, van con el nemotécnico y producto de ese instrumento, como en el export. Conviene correr juntas todas las cartolas del mes.
 - Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban además contra los que publican la Bolsa de Santiago (`datos/eventos_bolsa_<AAAAMMDD>.csv`, acciones, fondos y emisores extranjeros) y DataFondos (`datos/eventos_capital.csv`, fondos): eso identifica el instrumento de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que las tablas no explican queda como caja, con su causa en el reporte, nunca con un instrumento supuesto. Antes de conciliar, la corrida pone al día esas tablas sola (ver "Eventos de capital con la Bolsa y DataFondos"). `--bolsa <archivo>` usa otra tabla de la Bolsa (o un Excel de la Bolsa) y `--bolsa no` no la usa; `--eventos-capital <archivo.csv>` usa otra tabla de DataFondos y `--eventos-capital no` no usa ninguna de las dos. `--sin-internet` usa las tablas de la skill como están, sin bajar ni consultar nada.
 - Si llegan el informe provisorio y la cartola definitiva de un mismo cliente y período (Larrainvial), se usa la definitiva.
-- `--solo-afi` exporta solo los portafolios de AFI Trading (solo BICE nueva trae el portafolio).
+- `--portafolio <texto>` exporta solo las cuentas cuyo portafolio contiene ese texto (solo BICE nueva trae el portafolio). Para replicar un export de BICE, usar el texto que tienen en común los nombres de la columna `Portafolio` de ese export.
 - Termina con código 1 si algún PDF no se pudo leer o alguna cartola tiene cuadraturas que no cierran.
 
 Después de correrla, revisar el reporte: cada cartola con una cuadratura que no cierra debe mirarse contra el PDF antes de usar sus filas.

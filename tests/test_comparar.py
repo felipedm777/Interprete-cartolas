@@ -43,7 +43,7 @@ def _compra(rut, nombre, fecha):
 def _escribir(carpeta, fecha, caja, acciones, compras):
     carpeta.mkdir()
     for archivo, filas in ((SALDOS_CAJA, caja), (CUSTODIA_ACCIONES, acciones), (MOVIMIENTOS_BOLSA, compras)):
-        escribir(archivo, filas, carpeta / archivo.nombre_archivo("10038", fecha))
+        escribir(archivo, filas, carpeta / archivo.nombre_archivo("12345", fecha))
 
 
 def test_coincide(tmp_path):
@@ -51,7 +51,7 @@ def test_coincide(tmp_path):
     _escribir(tmp_path / "export", "2026-09-30", *filas)
     _escribir(tmp_path / "salida", "2026-09-30", *filas)
     assert main([str(tmp_path / "export"), str(tmp_path / "salida")]) == 0
-    assert (tmp_path / "salida" / "COMPARACION_10038.md").exists()
+    assert (tmp_path / "salida" / "COMPARACION_12345.md").exists()
 
 
 def test_diferencias(tmp_path):
@@ -110,7 +110,7 @@ def test_export_de_varios_dias(tmp_path):
         escribir(
             MOVIMIENTOS_BOLSA,
             [_compra("1-9", "ACCION Y", fecha)],
-            export / MOVIMIENTOS_BOLSA.nombre_archivo("10038", fecha),
+            export / MOVIMIENTOS_BOLSA.nombre_archivo("12345", fecha),
         )
     _escribir(
         tmp_path / "salida",
@@ -138,7 +138,7 @@ def test_empareja_primero_las_filas_mas_parecidas(tmp_path):
     escribir(
         MOVIMIENTOS_BOLSA,
         [_compra("1-9", "OTRA", "2026-09-12")],
-        tmp_path / "export" / MOVIMIENTOS_BOLSA.nombre_archivo("10038", "2026-09-12"),
+        tmp_path / "export" / MOVIMIENTOS_BOLSA.nombre_archivo("12345", "2026-09-12"),
     )
     reporte = tmp_path / "r.md"
     main([str(tmp_path / "export"), str(tmp_path / "salida"), "--reporte", str(reporte)])

@@ -65,8 +65,9 @@ class Salida:
         self.avisos += otra.avisos
 
 
-def es_afi(cuenta: Cuenta) -> bool:
-    return "AFITRADING" in cuenta.portafolio.upper()
+def es_del_portafolio(cuenta: Cuenta, texto: str) -> bool:
+    """Si el nombre del portafolio de la cuenta contiene el texto, sin importar mayúsculas."""
+    return texto.strip().upper() in cuenta.portafolio.upper()
 
 
 def _tipo(cuenta: Cuenta) -> TipoCuenta | None:
@@ -75,11 +76,12 @@ def _tipo(cuenta: Cuenta) -> TipoCuenta | None:
     return tipo_cuenta(cuenta.numero)
 
 
-def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Salida:
+def generar(cartola: Cartola, catalogo: Catalogo, portafolio: str | None = None) -> Salida:
     """Filas de los 7 archivos para una cartola.
 
     La fecha de proceso de los saldos es el cierre de la cartola y la de cada
-    movimiento, su propia fecha.
+    movimiento, su propia fecha. Con `portafolio`, solo se exportan las cuentas
+    cuyo portafolio contiene ese texto.
     """
     salida = Salida()
     tc = cartola.tipo_cambio_usd
@@ -94,8 +96,8 @@ def generar(cartola: Cartola, catalogo: Catalogo, solo_afi: bool = False) -> Sal
         if _tipo(cuenta) is None:
             salida.omitidos.append(f"{que}: cuenta {numero} ({cuenta.grupo}) sin equivalente en el export")
             return None
-        if solo_afi and not es_afi(cuenta):
-            salida.omitidos.append(f"{que}: {cuenta.portafolio} no es de AFI Trading")
+        if portafolio and not es_del_portafolio(cuenta, portafolio):
+            salida.omitidos.append(f"{que}: el portafolio {cuenta.portafolio} no contiene «{portafolio.strip()}»")
             return None
         return cuenta
 

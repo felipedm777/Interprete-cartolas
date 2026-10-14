@@ -27,6 +27,8 @@ Hace copias de las cartolas con los datos de los clientes (nombre, RUT, direcci�
 
 Si después aparecen RUT nuevos (otra cartola), el script los agrega al final de `clientes.csv` y se detiene para que los revises.
 
+Si algunos clientes tienen correo con el dominio de la asesora, agrega `--dominio-asesora <dominio>` (se puede repetir) en las tres corridas: en esos correos se cambia solo la parte antes de la @. Sin la opción también se cambia el dominio.
+
 ### Qué hace
 
 - Reemplaza cada nombre, RUT y dato de `otros_datos.csv` por uno falso, siempre el mismo para el mismo cliente, en el texto de los PDF, en los Excel (`.xlsx`, `.xlsm`), en los `.csv`/`.txt` y en los nombres de archivo. Los RUT falsos tienen dígito verificador válido.

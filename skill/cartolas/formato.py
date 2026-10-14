@@ -26,7 +26,7 @@ class Archivo:
         return [c.nombre for c in self.columnas]
 
     def nombre_archivo(self, portafolio: str, fecha_proceso: str) -> str:
-        """Nombre como en el ejemplo: SALDOS_CAJA_10038_20260922_V2.csv."""
+        """Nombre como en el ejemplo: SALDOS_CAJA_12345_20260922_V2.csv."""
         return f"{self.tipo}_{portafolio}_{fecha_proceso.replace('-', '')}_V2.csv"
 
 
