@@ -195,8 +195,9 @@ DOMINIOS_INSTITUCION = {
     "bny.com", "pershing.com", "inversionessecurity.cl", "security.cl",
 }
 
-# Dominios de la asesora: en un correo de cliente se cambia la parte antes de la @.
-DOMINIOS_ASESORA = {"afitrading.com", "afit.cl"}
+# Dominios de la asesora (`--dominio-asesora`): en un correo de cliente con ese
+# dominio se cambia solo la parte antes de la @. Sin la opción, también el dominio.
+DOMINIOS_ASESORA: set[str] = set()
 
 
 # --------------------------------------------------------------------------
@@ -1727,7 +1728,11 @@ def main():
                         help="carpeta que contiene Training Data y Example (por defecto, la de este script "
                              "o la carpeta actual)")
     parser.add_argument("--semilla", type=int, default=None, help="semilla para los datos falsos (pruebas)")
+    parser.add_argument("--dominio-asesora", action="append", default=[], metavar="DOMINIO",
+                        help="dominio de correo de la asesora (se puede repetir): en los correos de clientes "
+                             "con ese dominio se cambia solo la parte antes de la @")
     args = parser.parse_args()
+    DOMINIOS_ASESORA.update(d.strip().lstrip("@").lower() for d in args.dominio_asesora if d.strip())
 
     if pymupdf is None or openpyxl is None:
         print("Faltan librerías. Instálalas con:\n    py -m pip install pymupdf openpyxl")

@@ -72,7 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         help="código para el nombre de los archivos BICE (por defecto, el de los PDF o BICE)",
     )
     parser.add_argument("--fecha", help="fecha para el nombre de los archivos, AAAA-MM-DD (por defecto, el último cierre)")
-    parser.add_argument("--solo-afi", action="store_true", help="exportar solo los portafolios de AFI Trading")
+    parser.add_argument(
+        "--portafolio",
+        metavar="TEXTO",
+        help="exportar solo las cuentas cuyo portafolio contiene este texto (solo BICE nueva trae el portafolio)",
+    )
     parser.add_argument(
         "--tipo-cambio-eur",
         help="tipo de cambio del euro al último cierre (p. ej. 1102,72109), para las cartolas que no lo "
@@ -117,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     for r in resultados:
         if r.cartola:
             r.cartola.controles += validar(r.cartola)
-            r.salida = generar(r.cartola, catalogo, solo_afi=args.solo_afi)
+            r.salida = generar(r.cartola, catalogo, portafolio=args.portafolio)
 
     # Un juego de archivos por institución; BICE con el código del asesor.
     juegos: dict[str, list[Resultado]] = defaultdict(list)

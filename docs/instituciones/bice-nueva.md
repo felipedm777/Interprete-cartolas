@@ -1,6 +1,6 @@
 # BICE Inversiones: cartolas "nuevas" (formato septiembre 2026). Inventario de layout
 
-Fuente: `Training Data/BICE nuevas/` (20 PDF `CARTOLA_10038_202609_<RUT>.pdf`), cruzado contra `Example Export/` (export BICE, portafolio 10038, `FechaProceso` 2026-09-22).
+Fuente: `Training Data/BICE nuevas/` (20 PDF `CARTOLA_<código>_202609_<RUT>.pdf`), cruzado contra `Example Export/` (export BICE, portafolio <código>, `FechaProceso` 2026-09-22).
 
 Convenciones de este documento:
 - **#NN** = posición del archivo en orden alfabético de nombre (`ls | sort`, #01 a #20). No se listan los nombres de archivo porque contienen el RUT.
@@ -10,7 +10,7 @@ Convenciones de este documento:
 Resumen corto:
 - Formato muy regular, nativo digital (Poppins), con una tabla por clase de activo y por tipo de producto. No hay líneas de tabla: pdfplumber no detecta tablas, así que hay que leer palabras con coordenadas.
 - El PDF trae casi todo lo que piden SALDOS_FFMM, CUSTODIA_ACCIONES y SALDOS_CAJA. **No trae** `NemotecnicoInstrumento` (salvo CFI-xxx y acciones), `Emisor`, `TipoCambioEUR` ni `EnTransito`. Hay que derivarlos con una tabla maestra.
-- Contra el CSV del 22-09: **cantidades y PPC coinciden exacto** en 168/170 y 163/170 posiciones. Precio y valor difieren por fecha (30-09 contra 22-09), salvo en los FI cuyo valor cuota no cambió. Todas las diferencias de caja y posiciones se explican por la fecha, por el perímetro del export (solo portafolios "AFITRADING", sin Pershing) o por convenciones del CSV.
+- Contra el CSV del 22-09: **cantidades y PPC coinciden exacto** en 168/170 y 163/170 posiciones. Precio y valor difieren por fecha (30-09 contra 22-09), salvo en los FI cuyo valor cuota no cambió. Todas las diferencias de caja y posiciones se explican por la fecha, por el perímetro del export (solo portafolios de la asesora, sin Pershing) o por convenciones del CSV.
 
 ---
 
@@ -93,10 +93,10 @@ Esta página no aporta filas a los CSV. Solo sirve para validar totales.
 Encabezado: `Número cuenta` | `Activos` | `Pasivos` | `Patrimonio` | `Porcentaje de activo`.
 Filas: grupo en bold (tipo de cuenta con subtotal) → portafolios en regular → `Total` en bold. Pershing muestra cada celda en 2 líneas (`$ 1.234.567` encima y `US$ 1.234` debajo). **Pasivos siempre vacío** en la muestra: un saldo de caja negativo se resta dentro de Activos (#14).
 Etiquetas de portafolio vistas (el texto exacto es el `Portafolio` del CSV):
-- `PORTAFOLIO N° k - AFITRADING ASESORIA FINANCIERA - S` (cuentas 0–9)
-- `PORTAFOLIO N° 1 - AFITRADING ASESORIA FINANCIERA - DAPV-B-S` (cuentas 80 y 90)
-- `PORTAFOLIO 57 BIS 0 - AFITRADING ASESORIA FINANCIERA - S`, `PORTAFOLIO - 1 - AFITRADING ASESORIA FINANCIERA`
-- **Sin "AFITRADING"** (otros mandatos, que no salen en el export 10038): `PORTAFOLIO N° 1`, `PORTAFOLIO N° 2`, `PORTAFOLIO - 0`, `PORTAFOLIO N° 1 - DAPV-B` (cuenta 80)
+- `PORTAFOLIO N° k - <ASESORA> - S` (cuentas 0–9)
+- `PORTAFOLIO N° 1 - <ASESORA> - DAPV-B-S` (cuentas 80 y 90)
+- `PORTAFOLIO 57 BIS 0 - <ASESORA> - S`, `PORTAFOLIO - 1 - <ASESORA>`
+- **Sin el nombre de la asesora** (otros mandatos, que no salen en el export <código>): `PORTAFOLIO N° 1`, `PORTAFOLIO N° 2`, `PORTAFOLIO - 0`, `PORTAFOLIO N° 1 - DAPV-B` (cuenta 80)
 - Pershing: `PORTAFOLIO N° 1 - <CTA_PERSHING>` con Número cuenta = `<CTA_PERSHING>`
 
 ### 3.4 Resumen por Clase de Activos (Página 03)
@@ -181,7 +181,7 @@ Contexto del período: casi todos los clientes fueron **migrados desde Valores S
 ### 5.0 Relación de cuentas y portafolios (verificado contra el CSV)
 - `Cuenta` (CSV) = **Número cuenta** (PDF). `Portafolio` (CSV) = **etiqueta exacta del portafolio** (Resumen por tipo de cuentas o Detalle de Caja), carácter por carácter. Se verificó en 47 de 47 combinaciones RUT–cuenta presentes en ambos.
 - `ProductoBase` = grupo del PDF: "Cuenta de Inversión" → `CUENTA INVERSION`, "APV Prime" → `APV PRIME`, "APV FFMM" → `APV FFMM`. Coincide con el rango de cuenta del CSV: 0–9 = CUENTA INVERSION, 80–85 = APV FFMM, 90–96 = APV PRIME. "Mercado Internacional Pershing" no tiene equivalente.
-- **Perímetro del export 10038**: solo portafolios cuyo nombre contiene "AFITRADING ASESORIA FINANCIERA". Los portafolios sin ese texto (6 de cuenta de inversión y 1 APV FFMM en 5 archivos) y Pershing **no están** en el CSV. Un portafolio AFI con $0 (#03, cuenta 2) tampoco tiene filas.
+- **Perímetro del export <código>**: solo portafolios cuyo nombre contiene "<ASESORA>". Los portafolios sin ese texto (6 de cuenta de inversión y 1 APV FFMM en 5 archivos) y Pershing **no están** en el CSV. Un portafolio de la asesora con $0 (#03, cuenta 2) tampoco tiene filas.
 - `TipoAPV` / `DescripcionTipoRegimenTributario`: no vienen como campo. Se derivan del sufijo del portafolio con la regla que muestra el CSV:
 
 | Sufijo del portafolio | Cuenta | TipoAPV | DescripcionTipoRegimenTributario |
@@ -256,26 +256,26 @@ Contexto del período: casi todos los clientes fueron **migrados desde Valores S
 
 Sobre los 20 archivos se cruzó por `RutCliente` + `Cuenta` + `Instrumento`, y por cantidad cuando el nombre no calzó:
 - **185 posiciones** en los PDF. **170** tienen fila en el CSV: 169 por nombre exacto y 1 solo por cantidad.
-  - Las **15 sin fila** se explican todas: 9 están en portafolios sin "AFITRADING", 2 son de Pershing y 4 son FM **comprados el 24–25-09** (FM SECURITY DEFENSIVO SERIE A ×2 y FM SECURITY MID TERM UF SERIE I-APV ×2, estos últimos dentro de APV PRIME, cuenta 90; no hay ejemplo de cómo exporta BICE un FM en APV PRIME).
+  - Las **15 sin fila** se explican todas: 9 están en portafolios sin el nombre de la asesora, 2 son de Pershing y 4 son FM **comprados el 24–25-09** (FM SECURITY DEFENSIVO SERIE A ×2 y FM SECURITY MID TERM UF SERIE I-APV ×2, estos últimos dentro de APV PRIME, cuenta 90; no hay ejemplo de cómo exporta BICE un FM en APV PRIME).
   - **3 filas del CSV sin posición** en el PDF: 2 FM rescatados el 24-09 y 1 ETF con otro nombre (ver cliente #14).
 - **Cantidad**: igual en 168/170. Una diferencia es una compra del 24-09. La otra (#03, FM COMPASS TOESCA CHILE EQUITIES SERIE B) son +2 cuotas a costo ≈ 0 **sin movimiento** en el PDF, probablemente cuotas liberadas o reinversión.
 - **PPC**: igual en 163/170. 4 difieren en el 4º decimal (redondeo distinto). 2 se deben a compras del 21 y 24-09: el PDF ya incluye el promedio ponderado y el CSV no. Queda 1 (COMPASS).
 - **Precio**: igual en 36/170. Son siempre FI cuyo valor cuota no cambió entre el 22 y el 30-09. Difiere en todos los FFMM (valor diario), acciones y FI con nuevo valor. → **diferencia explicada por fecha**.
 - **Valor de mercado**: igual solo donde el precio es igual y la valoración no pasa por TC. En posiciones USD valoradas en CLP (APV PRIME), aun con igual precio, el CLP del PDF / CSV = 972,6 / 945,87 = 1,02826 exacto. → **diferencia de TC por fecha**.
-- **Caja** (26 combinaciones cuenta × moneda): `CSV(22-09) + Σ movimientos posteriores al 22-09 = PDF(30-09)` cuadra **exacto** en 17. El resto se explica así: (a) CARGO EN DOLARES rotulado CLP (3 clientes); (b) CSV que consolida la caja USD en una fila CLP dentro de APV PRIME (3 clientes); (c) Pershing y portafolio sin AFI, que no están en el CSV (2 combinaciones). De las 9 combinaciones que no cuadran directo, 7 sí lo hacen al corregir (a) y (b). Las 2 de (c) no tienen contraparte en el CSV. La comparación USD usa ±1 porque el PDF redondea a entero (p. ej. US$ 12 en el PDF contra 12,34 en el CSV).
+- **Caja** (26 combinaciones cuenta × moneda): `CSV(22-09) + Σ movimientos posteriores al 22-09 = PDF(30-09)` cuadra **exacto** en 17. El resto se explica así: (a) CARGO EN DOLARES rotulado CLP (3 clientes); (b) CSV que consolida la caja USD en una fila CLP dentro de APV PRIME (3 clientes); (c) Pershing y portafolio sin la asesora, que no están en el CSV (2 combinaciones). De las 9 combinaciones que no cuadran directo, 7 sí lo hacen al corregir (a) y (b). Las 2 de (c) no tienen contraparte en el CSV. La comparación USD usa ±1 porque el PDF redondea a entero (p. ej. US$ 12 en el PDF contra 12,34 en el CSV).
 - **Movimientos**: el CSV no tiene **ninguna** fila para estos 20 RUT y ningún movimiento de los PDF tiene fecha 22-09 (hay días 02–17, 21, 24–30). Esto es consistente con que los MOVIMIENTOS_* del Example son de un solo día de proceso.
 
 Detalle de 5 clientes:
 
 | Cliente | Perfil | Qué coincide exacto | Qué difiere y por qué |
 |---|---|---|---|
-| #04 | 5 portafolios de inversión (2 sin AFI) + APV Prime + Pershing; acciones, CFI CLP/USD, FFMM, FI BICE | 21/21 posiciones AFI: cantidad y PPC. 3 FI (TOESCA INFRAESTRUCTURA B, TOESCA RENTA RESIDENCIAL A, FYNSA PANTHEON GLOBAL CO-INV) con igual valor cuota → valor idéntico (el USD en US$; el CLP solo cambia por TC). Caja APV (cuenta 90) idéntica. `NUEVAPOLAR` ↔ nemo `ABC` | Valor cuota y precio de acciones distintos (fecha). Caja de la cuenta 2: no está en el CSV porque nace con REPARTO DE DINERO + DIVIDENDO EN PESOS del 30-09 (cuadra exacto). BICE ACCIONES CHILE ACTIVO LIQUIDEZ en cuentas 0/1 (sin AFI) y todo Pershing (bono, nota, caja USD): ausentes del CSV por perímetro |
+| #04 | 5 portafolios de inversión (2 sin la asesora) + APV Prime + Pershing; acciones, CFI CLP/USD, FFMM, FI BICE | 21/21 posiciones de la asesora: cantidad y PPC. 3 FI (TOESCA INFRAESTRUCTURA B, TOESCA RENTA RESIDENCIAL A, FYNSA PANTHEON GLOBAL CO-INV) con igual valor cuota → valor idéntico (el USD en US$; el CLP solo cambia por TC). Caja APV (cuenta 90) idéntica. `NUEVAPOLAR` ↔ nemo `ABC` | Valor cuota y precio de acciones distintos (fecha). Caja de la cuenta 2: no está en el CSV porque nace con REPARTO DE DINERO + DIVIDENDO EN PESOS del 30-09 (cuadra exacto). BICE ACCIONES CHILE ACTIVO LIQUIDEZ en cuentas 0/1 (sin la asesora) y todo Pershing (bono, nota, caja USD): ausentes del CSV por perímetro |
 | #05 | Cuenta "PORTAFOLIO 57 BIS 0" + APV Prime con muchos CFI USD | 19/19: cantidad y PPC. CFI USD: el CSV valora en CLP con precio en USD, igual que el PDF muestra `$` y `US$` | Valor CLP ×1,02826 donde el precio no cambió (TC). FM MID TERM UF I-APV (cuenta 90): ausente del CSV por compra del 25-09. Caja APV: el CSV trae 1 fila CLP con decimales (CLP + USD×945,87); el PDF separa Pesos y Dólar. Cuadra con los movimientos del 25-09 si CARGO EN DOLARES se toma como USD |
-| #08 | Caja CLP+USD; FFMM, CFI; Intermediación en portafolio sin AFI | 15/15: cantidad y PPC. 2 FI con precio y valor idénticos. Caja CLP: CSV + movimientos del 25 y 30-09 = PDF exacto | Caja USD: el CSV tiene centavos y el PDF la muestra entera en el movimiento del 14-09; se liquida el 25-09 con un CARGO EN DOLARES rotulado CLP. FUBIC (Intermediación, cuenta 0 sin AFI) ausente del CSV |
+| #08 | Caja CLP+USD; FFMM, CFI; Intermediación en portafolio sin la asesora | 15/15: cantidad y PPC. 2 FI con precio y valor idénticos. Caja CLP: CSV + movimientos del 25 y 30-09 = PDF exacto | Caja USD: el CSV tiene centavos y el PDF la muestra entera en el movimiento del 14-09; se liquida el 25-09 con un CARGO EN DOLARES rotulado CLP. FUBIC (Intermediación, cuenta 0 sin la asesora) ausente del CSV |
 | #13 | Solo USD: caja USD, FM USD, CFI USD, más un FM CLP de valor mínimo | Caja USD **al centavo** entre Resumen por Clase (US$ con 2 decimales) y SALDOS_CAJA. 3/3 posiciones: cantidad y PPC | Precio y valor por fecha. Detalle de Caja muestra la caja USD redondeada a entero. La posición mínima en CLP no aparece en Resumen por Clase |
 | #14 | Persona jurídica; compras y rescates después del 22-09; caja USD negativa | CLP y USD de caja: CSV + movimientos posteriores = PDF exacto (incluido el saldo USD negativo). FI LINK HOLLYPORT IX, SERIE B del PDF (tabla ETF de RV Nacional) = CSV `ETF SINGULAR GLOBAL EQUITIES` (nemo CFI-LCPHBE): igual cuenta, cantidad, PPC, precio y US$ | **Nombre de instrumento distinto** (el nemo apunta a Hollyport, así que el error parece estar en el CSV). DOVER STREET XI: igual cantidad, PPC distinto (compra del 21-09 ya en la cantidad del CSV, pero no en su costo). NM PARTNERS VII: compra del 24-09 → PDF = CSV + compra. 2 FFMM de la cuenta 1 rescatados el 24-09: siguen en el CSV y faltan en el PDF |
 
-**Nombres de instrumento PDF ↔ CSV**: `Instrumento` (CSV) = nombre de la fila del PDF, incluidos espacios dobles, comas y sufijos de serie. `NemotecnicoInstrumento` solo es deducible del nombre cuando ya es nemotécnico (`CFI-…`, acciones), y aun ahí hay excepciones (NUEVAPOLAR → ABC). En los demás casos (CFI con nombre largo, FM, FI BICE) hace falta una tabla de equivalencias. El catálogo del CSV cubre 76 de los 89 nombres distintos de los PDF (posiciones y movimientos). Faltan 13: los fondos "BICE …" de portafolios sin AFI o ya rescatados (8), los bonos y notas Pershing (2), el FUBIC, FM SECURITY MID TERM UF SERIE I-APV y FI LINK HOLLYPORT IX, SERIE B.
+**Nombres de instrumento PDF ↔ CSV**: `Instrumento` (CSV) = nombre de la fila del PDF, incluidos espacios dobles, comas y sufijos de serie. `NemotecnicoInstrumento` solo es deducible del nombre cuando ya es nemotécnico (`CFI-…`, acciones), y aun ahí hay excepciones (NUEVAPOLAR → ABC). En los demás casos (CFI con nombre largo, FM, FI BICE) hace falta una tabla de equivalencias. El catálogo del CSV cubre 76 de los 89 nombres distintos de los PDF (posiciones y movimientos). Faltan 13: los fondos "BICE …" de portafolios sin la asesora o ya rescatados (8), los bonos y notas Pershing (2), el FUBIC, FM SECURITY MID TERM UF SERIE I-APV y FI LINK HOLLYPORT IX, SERIE B.
 
 ## 6. Cuadraturas (probadas en los 20 archivos)
 
@@ -311,7 +311,7 @@ En #04, #08 y #13 (los tres revisados también a mano) todas las reglas aplicabl
 6. **Pérdida de precisión en USD**: caja, movimientos y valor de mercado en US$ enteros. Los centavos solo se recuperan desde el equivalente CLP / 972,6 o desde Resumen por Clase.
 7. **Formatos atípicos**: `Nominales` de bonos con coma como separador de miles; nominales en UF en Intermediación; precio de Notas en % del nominal; fecha de vencimiento `01-01-1900` como relleno; `Tasa de emisión` a veces sin `%`.
 8. **Movimiento de Títulos colapsa filas idénticas.** No sirve para reconstruir cantidades y faltan eventos (cuotas liberadas). Para saldos hay que usar siempre las tablas de detalle.
-9. **Perímetro**: la cartola trae portafolios que no son de AFI y Pershing. Hay que decidir si se exportan, y a qué archivo.
+9. **Perímetro**: la cartola trae portafolios que no son de la asesora y Pershing. Hay que decidir si se exportan, y a qué archivo.
 10. **Clasificación PDF ≠ Producto CSV**: FI listados como "Acciones", ETF listados como "Fondos De Inversión", FI BICE mezclados con CFI. Hace falta una tabla maestra por instrumento.
 11. **Nombre distinto entre PDF y CSV** para la misma posición (HOLLYPORT ↔ ETF SINGULAR GLOBAL EQUITIES). Si se valida contra el CSV, cruzar también por cuenta + cantidad + PPC.
 12. **Variantes de Página 01** (A, B y C) y tabla de Resumen por Clase sin columna APV para personas jurídicas.
@@ -333,7 +333,7 @@ En #04, #08 y #13 (los tres revisados también a mano) todas las reglas aplicabl
 8. **Validación automática**: aplicar las reglas de §6 por archivo y marcar el archivo si alguna falla fuera de tolerancia.
 
 Preguntas abiertas para Felipe:
-- ¿Se exportan los portafolios sin "AFITRADING" y Pershing? ¿A qué archivo van Pershing e Intermediación Financiera?
+- ¿Se exportan los portafolios sin el nombre de la asesora y Pershing? ¿A qué archivo van Pershing e Intermediación Financiera?
 - ¿FechaProceso = fin de período?
 - ¿Qué valor usar en `EnTransito` y en `TipoCambioEUR`?
 - ¿Cómo debe salir un FM dentro de APV PRIME?
@@ -345,7 +345,7 @@ Preguntas abiertas para Felipe:
 
 ```
 cd skill
-python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>" [--solo-afi]
+python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>" [--portafolio <texto>]
 ```
 
 Escribe los 7 CSV con el nombre `<ARCHIVO>_<código>_<cierre>_V2.csv` (el código se toma del nombre de los PDF, `CARTOLA_<código>_...`) y un `REPORTE_<código>_<cierre>.md` con las cuadraturas que no cierran, los avisos y lo que no se exportó. El reporte trae RUT y nombres de archivo, así que no va al repositorio.
@@ -361,11 +361,11 @@ Escribe los 7 CSV con el nombre `<ARCHIVO>_<código>_<cierre>_V2.csv` (el códig
 | Misma cantidad | 168. Las 2 restantes cambiaron entre el 22-09 y el 30-09 (una por una compra del 24-09 que aparece en los movimientos); en ambas el valor exportado es el impreso en la cartola |
 | Mismo precio promedio de compra | 163. En las 7 restantes el valor exportado es el impreso en la cartola; 4 difieren en 0,0001 o 0,0002 |
 
-De las 12 posiciones sin par en el ejemplo, 8 son de portafolios que no son de AFI Trading (el ejemplo no los trae) y 4 se compraron el 24 y 25-09, después del export, según los movimientos. 10 de ellas son fondos que no están en la tabla maestra, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
+De las 12 posiciones sin par en el ejemplo, 8 son de portafolios que no son de la asesora (el ejemplo no los trae) y 4 se compraron el 24 y 25-09, después del export, según los movimientos. 10 de ellas son fondos que no están en la tabla maestra, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
 
 ### Resultado contra el export diario al 30-09 (480 cartolas del SFTP)
 
-Cartolas de septiembre de todos los clientes, corridas juntas con `--solo-afi --tipo-cambio-eur 1102,72109` y comparadas con `python -m cartolas.comparar` contra los saldos del 30-09 y los movimientos diarios del 11-09 al 30-09. Las 480 cartolas cierran todas sus cuadraturas.
+Cartolas de septiembre de todos los clientes, corridas juntas con `--portafolio <texto de la asesora> --tipo-cambio-eur 1102,72109` y comparadas con `python -m cartolas.comparar` contra los saldos del 30-09 y los movimientos diarios del 11-09 al 30-09. Las 480 cartolas cierran todas sus cuadraturas.
 
 | Archivo | Filas del export con par | Diferencias que quedan | Sin par |
 |---|---|---|---|
@@ -380,7 +380,7 @@ Lo que no tiene par o difiere viene de lo que la cartola no imprime o de inconsi
 
 ### Decisiones mientras Felipe responde las preguntas
 
-- **Portafolios.** Se exportan todos; `--solo-afi` deja solo los que dicen AFITRADING, como el ejemplo.
+- **Portafolios.** Se exportan todos; `--portafolio <texto>` deja solo los que contienen ese texto (el nombre de la asesora), como el ejemplo.
 - **Cuenta Pershing dentro de la cartola.** No se exporta (su caja, bonos y notas): no tiene número de cuenta BICE y el ejemplo no trae saldos Pershing. Queda en el reporte.
 - **Sin archivo de destino.** Intermediación Financiera, Bonos, Bonos Internacionales y Notas quedan en el reporte (el export lleva los bonos a `CUSTODIA_RENTA_FIJA`, que la skill no escribe). Sus movimientos `INGRESO RF` sí van a `MOVIMIENTOS_BOLSA`, como en el export, igual que `VENTA CF`.
 - **FechaProceso.** Saldos: fecha de cierre de la cartola. Movimientos: fecha del movimiento.

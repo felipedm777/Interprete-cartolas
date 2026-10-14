@@ -11,7 +11,7 @@ Privacidad: aquí no aparecen nombres, RUT, direcciones, emails, teléfonos, nú
 - **Hay dos formatos en la carpeta, no uno.** Cada archivo trae una cartola **BICE Inversiones de formato antiguo** (parte A: A4 vertical, 4 a 7 páginas). En **10 de los 12 archivos** viene pegada a continuación, en el mismo PDF, una **"CARTOLA CONSOLIDADA DE INVERSIONES" de Valores Security S.A. CdB / AGF Security S.A.** (parte B: carta horizontal, 4 a 14 páginas). Las dos partes son del mismo cliente (mismo RUT) y del mismo mes. Solo `Abril_del_2026 (1).pdf` y `Document_639264687123145217.pdf` son BICE puras.
 - **Período:** todos los archivos cubren **01-04-2026 al 30-04-2026**. Cada archivo tiene un solo cliente y un solo mes. La parte A tiene fecha de emisión 30-04-2026 y la parte B dice "Emisión: 26-05-2026 hh:mm:ss" o "27-05-2026 hh:mm:ss".
 - **Duplicado:** `Document_639264713336299367.pdf` y `Document_639264718245976399.pdf` son **el mismo estado con el mismo cliente ficticio**. El texto y las palabras con coordenadas son idénticos página por página, y el render también. Los bytes solo difieren en el `/ID` del trailer PDF (62 bytes). Es un duplicado exacto que hay que descartar.
-- **Cruce con Example Export:** hay 11 RUT distintos en 12 archivos. 10 de esos 11 RUT (es decir, 11 de los 12 archivos) aparecen en `RutCliente`. Falta el de `Document_639264687123145217.pdf`. **El export no sirve para validar los montos**: es del 2026-09-22 (cinco meses después) y solo incluye las cuentas del asesor (portafolios "AFITRADING"). Esas cuentas corresponden casi siempre a las **antiguas cuentas Security migradas a BICE**. **Sí sirve** como catálogo (nemotécnico, nombre largo, Emisor, Producto, TipoAPV/Régimen) y como chequeo parcial de cantidades de la parte B: unas 2/3 de las posiciones CFI de Security tienen el mismo nemotécnico y la misma cantidad en el export.
+- **Cruce con Example Export:** hay 11 RUT distintos en 12 archivos. 10 de esos 11 RUT (es decir, 11 de los 12 archivos) aparecen en `RutCliente`. Falta el de `Document_639264687123145217.pdf`. **El export no sirve para validar los montos**: es del 2026-09-22 (cinco meses después) y solo incluye las cuentas del asesor (portafolios de la asesora). Esas cuentas corresponden casi siempre a las **antiguas cuentas Security migradas a BICE**. **Sí sirve** como catálogo (nemotécnico, nombre largo, Emisor, Producto, TipoAPV/Régimen) y como chequeo parcial de cantidades de la parte B: unas 2/3 de las posiciones CFI de Security tienen el mismo nemotécnico y la misma cantidad en el export.
 - **Cuadraturas:** los totales impresos cuadran con el detalle en las dos partes con tolerancia de redondeo ≤ 1 peso, o ≤ 0,01 en US$. Hay dos excepciones previsibles. En la parte A, "Ganancia/Pérdida" excluye los Depósitos a Plazo. En la parte B, el precio de los dividendos de CFI en USD no multiplica a un monto en CLP (detalle en §6).
 - **Texto extraíble** en el 100 % de las páginas (no hay escaneos). **Recomendación:** pymupdf `get_text("words")` con columnas por coordenadas. pdfplumber `extract_tables` no sirve aquí (§8).
 
@@ -247,7 +247,7 @@ Convenciones numéricas en las dos partes:
 **Columnas comunes:**
 - **FechaProceso:** fecha de cierre del período (`30-04-2026` → `2026-04-30`). En el export es la fecha de proceso (un solo valor). Para movimientos hay que decidir si va la fecha de cada movimiento (recomendado) o el cierre del período.
 - **RutCliente:** el `Rut:` de la página 1 (parte A) o el `Rut :` de cualquier página (parte B), sin puntos (`NNNNNNNN-D`). El dígito verificador `K` va en mayúscula.
-- **Portafolio:** **no tiene fuente.** Ninguna de las dos partes menciona "PORTAFOLIO N°…" ni al asesor. En el export este campo es un nombre interno de BICE (`PORTAFOLIO N° k - AFITRADING ASESORIA FINANCIERA - <régimen>-S`). Hay que preguntar o dejarlo vacío.
+- **Portafolio:** **no tiene fuente.** Ninguna de las dos partes menciona "PORTAFOLIO N°…" ni al asesor. En el export este campo es un nombre interno de BICE (`PORTAFOLIO N° k - <ASESORA> - <régimen>-S`). Hay que preguntar o dejarlo vacío.
 
 ### SALDOS_CAJA
 
@@ -467,7 +467,7 @@ Se compararon 2 PDF de `BICE nuevas` (septiembre de 2026), sin estudiarlos a fon
 | Movimientos de títulos | Fecha, N°Ref., Operación, Instrumento (con `- CUENTA FONDO: n`, multilínea), P/B, Cantidad, Precio TIR, Monto Neto | Fecha, Número cuenta, Nº Referencia (`FD_…_1` o numérico), Tipo de operación, Instrumento, Moneda, Cantidad, Precio, Monto |
 | Formato de celdas | Números sin símbolo de moneda | `$ 1.234.567`, `US$ 1.234,56`, `USD 1,2345` |
 | Dividendos | Tabla "Dividendos del Período" | Columna "Dividendos" por posición |
-| Instrumentos ex-Security | En una cartola Security aparte (parte B) | Integrados: `FM SECURITY …`, CFI Ameris/Toesca/etc. en portafolios AFITRADING |
+| Instrumentos ex-Security | En una cartola Security aparte (parte B) | Integrados: `FM SECURITY …`, CFI Ameris/Toesca/etc. en portafolios de la asesora |
 | Paginación | `Página N de M` con flechas | `Página 0N` |
 
 Uno de los clientes (el de `Document_639264679165525057`) también tiene una cartola BICE nueva de septiembre en `BICE nuevas`. Sirve para ver el mismo cliente en los dos formatos, aunque con 5 meses de diferencia.
@@ -477,11 +477,11 @@ Uno de los clientes (el de `Document_639264679165525057`) también tiene una car
 ## 10. Extra: cruce con Example Export y utilidad para validar
 
 - **RUT:** de los 11 RUT distintos, 10 están en `RutCliente` (los 12 archivos menos `Document_639264687123145217`). Ese archivo es una cartola BICE pura, con solo fondos mutuos en $.
-- **Qué contiene el export:** es BICE al 2026-09-22 y solo trae portafolios "AFITRADING". Por RUT tiene sobre todo:
+- **Qué contiene el export:** es BICE al 2026-09-22 y solo trae portafolios de la asesora. Por RUT tiene sobre todo:
   - FM `FM SECURITY …` (Producto `FONDOS MUTUOS BICE`);
   - CFI y acciones que antes estaban en Security;
   - cuentas `APV PRIME` con TipoAPV y régimen.
-- **Hipótesis bien apoyada:** las cuentas Security de abril se migraron a BICE como portafolios AFITRADING. Lo que se midió:
+- **Hipótesis bien apoyada:** las cuentas Security de abril se migraron a BICE como portafolios de la asesora. Lo que se midió:
   - 162 de 180 posiciones de la parte B (Security) tienen el mismo nemotécnico o nombre en el export para el mismo RUT, y **123 de 180 tienen además la misma cantidad**.
   - En la parte A (BICE), solo 4 de 49 posiciones aparecen por nombre y ninguna con la misma cantidad: las cuentas BICE propias (sin asesor) no están en el export.
   - En el cliente del duplicado, dos cuentas APV de Security aparecen **fusionadas** en una sola cuenta APV PRIME de BICE: la suma de cantidades coincide. La correspondencia de cuentas no es 1:1.
@@ -538,7 +538,7 @@ Uno de los clientes (el de `Document_639264679165525057`) también tiene una car
 
 **Resultado en las 11 cartolas distintas** (12 PDF con un duplicado exacto, que el programa detecta por el texto y no procesa dos veces): todas las cuadraturas cierran (542 propias más las comunes). Se leen 60 posiciones (33 fondos mutuos, 3 FI BICE, 8 acciones, 5 CFI y 11 depósitos a plazo), 4 saldos de caja, 26 movimientos de caja y 25 de títulos, los mismos conteos que el prototipo de §6.
 
-**Tabla maestra.** Las 13 acciones y CFI se encuentran por nemotécnico. Ninguno de los fondos mutuos BICE de estas cartolas está en el export de ejemplo, que es de portafolios AFI de septiembre, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
+**Tabla maestra.** Las 13 acciones y CFI se encuentran por nemotécnico. Ninguno de los fondos mutuos BICE de estas cartolas está en el export de ejemplo, que es de portafolios de la asesora de septiembre, así que salen sin nemotécnico ni emisor y con un aviso en el reporte.
 
 ---
 

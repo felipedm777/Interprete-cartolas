@@ -220,7 +220,7 @@ Abreviaturas: "Hdr" = encabezado de página, "Pie" = *Valores de referencia*, "D
 | FechaProceso | Derivar: último día del `Periodo:` (ej. `Agosto 2026` → 2026-08-31). Confirmar con Felipe |
 | RutCliente | Hdr `R.U.T. Cliente:`, sin puntos (`12345678-9`), DV en mayúscula |
 | Cuenta | Hdr `Cuenta:` (siempre `0`) |
-| Portafolio | **Sin fuente** (en BICE es "PORTAFOLIO N° k - AFITRADING…"). Requiere tabla RUT→portafolio o decisión |
+| Portafolio | **Sin fuente** (en BICE es "PORTAFOLIO N° k - <ASESORA>…"). Requiere tabla RUT→portafolio o decisión |
 | ProductoBase | Sin fuente → `CUENTA INVERSION` (no hay APV en estos informes) |
 | Producto | Constante `CUENTAS CAJA` |
 | MonedaValoracionPatrimonio | `CLP` para `Saldo Caja Peso`, `USD` para `Saldo Caja Dólar` |
@@ -287,7 +287,7 @@ MOVIMIENTOS_PERSHING no aplica a estos informes.
   - Cliente A: 13 filas en CUSTODIA_ACCIONES, 2 en SALDOS_CAJA y 1 en SALDOS_FFMM.
   - Cliente B: 5 + 1 + 1.
   - Ninguno de los dos tiene movimientos en el export.
-- **Qué significa:** el anonimizador usa un mapeo consistente (el mismo RUT real da el mismo RUT ficticio), así que son **los mismos clientes de AFI Trading con cartera en ambos custodios**. El export de BICE contiene **solo lo custodiado en BICE**, en sus portafolios `PORTAFOLIO N° k - AFITRADING…`. Las posiciones de Larrainvial no están en el export: por ejemplo, el Cliente A tiene en BICE CFI-ALT2AE y CFI-FYNUAE con **cantidades distintas** a las de Larrainvial, y ninguno de los nemos propios de Larrainvial aparece.
+- **Qué significa:** el anonimizador usa un mapeo consistente (el mismo RUT real da el mismo RUT ficticio), así que son **los mismos clientes de la asesora con cartera en ambos custodios**. El export de BICE contiene **solo lo custodiado en BICE**, en sus portafolios `PORTAFOLIO N° k - <ASESORA>…`. Las posiciones de Larrainvial no están en el export: por ejemplo, el Cliente A tiene en BICE CFI-ALT2AE y CFI-FYNUAE con **cantidades distintas** a las de Larrainvial, y ninguno de los nemos propios de Larrainvial aparece.
 - **Consecuencias:**
   1. El export sirve para validar que el RUT extraído existe y para heredar convenciones (Producto, Instrumento y Emisor por nemo; Cuenta `0`; ProductoBase `CUENTA INVERSION`).
   2. **No** sirve para validar montos ni cantidades: es otro custodio y otra fecha (22-09-2026 frente al último informe, ago-2026).

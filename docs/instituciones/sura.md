@@ -232,7 +232,7 @@ La previsional/financiera de cada fila sale de la sección (`... Previsionales` 
 | FechaProceso | Fin del `PERÍODO` (31/08/2026 → `2026-08-31`). En movimientos queda por decidir si va la fecha del movimiento (columna Fecha) o la del cierre; el Example es un export diario y no lo aclara |
 | RutCliente | **Sin fuente**: tabla maestra por nombre |
 | Cuenta | **Sin fuente**: convención o tabla maestra |
-| Portafolio | **Sin fuente** (`PORTAFOLIO N° k - AFITRADING ASESORIA FINANCIERA - <sufijo>`). El sufijo se puede derivar del régimen (S, CV-A-S, CV-B-S, DC-S...), pero el número k no |
+| Portafolio | **Sin fuente** (`PORTAFOLIO N° k - <ASESORA> - <sufijo>`). El sufijo se puede derivar del régimen (S, CV-A-S, CV-B-S, DC-S...), pero el número k no |
 | ProductoBase | Se deriva de la sección: Financieras → `CUENTA INVERSION`; Previsionales → APV. Falta decidir el nombre: BICE usa `APV FFMM` para FM y `APV PRIME` para caja y custodia |
 | TipoAPV | Se deriva del Régimen (propuesta, a confirmar): `CVN_A`/`CVN_B`/`CVA_B` → `CV`; `DCA`/`DCN`/`DCR` → `DC`; `BON_F` → ¿`DAPVC`/`DAPV`? (en BICE "BF ..." aparece con DAPVC); `18Q`, `R.GRAL`, `18T`, `RTN`, `57B`, `57T` → vacío |
 | DescripcionTipoRegimenTributario | En el Example se observa: sufijo -A- → `APORTE`, -B- → `BONIFICACIÓN`, DC → `BONIFICACIÓN`. Para Sura: `*_A` → `APORTE`, `*_B` → `BONIFICACIÓN`, `DC*` → `BONIFICACIÓN`, `BON_F` → a confirmar, régimen general → vacío |

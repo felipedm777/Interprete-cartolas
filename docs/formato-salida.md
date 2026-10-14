@@ -1,6 +1,6 @@
 # Formato de salida: saldos y movimientos
 
-La skill debe producir los mismos archivos que el export de BICE que está en `Example Export` (portafolio 10038, fecha de proceso 2026-09-22). Este documento describe ese formato tal como viene en el ejemplo. La especificación en código está en `skill/cartolas/formato.py` y la prueba `tests/test_exportar.py` verifica que el exportador reproduce los 7 archivos del ejemplo byte a byte.
+La skill debe producir los mismos archivos que el export de BICE que está en `Example Export` (portafolio <código>, fecha de proceso 2026-09-22). Este documento describe ese formato tal como viene en el ejemplo. La especificación en código está en `skill/cartolas/formato.py` y la prueba `tests/test_exportar.py` verifica que el exportador reproduce los 7 archivos del ejemplo byte a byte.
 
 ## Archivos
 
@@ -14,7 +14,7 @@ La skill debe producir los mismos archivos que el export de BICE que está en `E
 | `MOVIMIENTOS_FFMM` | 4 | 18 | Inversiones y rescates de fondos mutuos |
 | `MOVIMIENTOS_PERSHING` | 0 | 17 | Movimientos en la custodia internacional Pershing (el ejemplo solo trae el encabezado) |
 
-Nombre de archivo: `<ARCHIVO>_<portafolio>_<AAAAMMDD>_V2.csv`, por ejemplo `SALDOS_CAJA_10038_20260922_V2.csv`.
+Nombre de archivo: `<ARCHIVO>_<portafolio>_<AAAAMMDD>_V2.csv`, por ejemplo `SALDOS_CAJA_12345_20260922_V2.csv`.
 
 ## Convenciones comunes
 
@@ -51,7 +51,7 @@ Nombre de archivo: `<ARCHIVO>_<portafolio>_<AAAAMMDD>_V2.csv`, por ejemplo `SALD
 | `FechaProceso` | `2026-09-22` | Fecha de corte del export |
 | `RutCliente` | RUT con guion | En las cartolas Sura no aparece el RUT (ver inventario) |
 | `Cuenta` | `0`–`9`, `80`–`85`, `90`–`96` | Ver tabla de cuentas |
-| `Portafolio` | `PORTAFOLIO N° <n> - AFITRADING ASESORIA FINANCIERA - <sufijo>` | También `PORTAFOLIO 57 BIS <n> - ...`. El sufijo indica el tipo de cuenta |
+| `Portafolio` | `PORTAFOLIO N° <n> - <ASESORA> - <sufijo>` | También `PORTAFOLIO 57 BIS <n> - ...`. El sufijo indica el tipo de cuenta |
 | `ProductoBase` | `CUENTA INVERSION`, `APV PRIME`, `APV FFMM` | |
 | `Producto` | `CUENTAS CAJA`, `FONDOS MUTUOS BICE`, `FONDOS INVERSIÓN BICE`, `CFI`, `ACCIONES`, `ETF`, `FORWARDS DIVISA` | Depende del archivo |
 

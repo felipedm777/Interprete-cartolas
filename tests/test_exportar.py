@@ -32,7 +32,7 @@ def test_columna_desconocida(tmp_path):
 
 
 def test_nombre_archivo():
-    assert SALDOS_CAJA.nombre_archivo("10038", "2026-09-22") == "SALDOS_CAJA_10038_20260922_V2.csv"
+    assert SALDOS_CAJA.nombre_archivo("12345", "2026-09-22") == "SALDOS_CAJA_12345_20260922_V2.csv"
 
 
 @pytest.mark.skipif(not EJEMPLO.exists(), reason="sin el export de ejemplo anonimizado")

@@ -64,7 +64,7 @@ Estas columnas del formato de salida no salen de ningún PDF, o solo de algunos:
 
 Ordenadas por cuánto afectan al diseño de la skill:
 
-1. **Alcance.** ¿Se exportan los portafolios que no son de AFI Trading, la parte Security de las cartolas BICE antiguas y los estados Pershing? Los depósitos a plazo, la intermediación financiera y los bonos no tienen archivo de destino en el ejemplo: ¿dónde van?
+1. **Alcance.** ¿Se exportan los portafolios que no son de la asesora, la parte Security de las cartolas BICE antiguas y los estados Pershing? Los depósitos a plazo, la intermediación financiera y los bonos no tienen archivo de destino en el ejemplo: ¿dónde van?
 2. **Clientes y cuentas.** Para Sura, Pershing, Larrainvial y Security hace falta una tabla que diga, por cliente, su RUT, cuenta y portafolio. ¿Existe ya en algún sistema?
 3. **Institución.** Un mismo RUT tendrá filas de BICE y de Larrainvial, a veces con el mismo instrumento. ¿Cómo se distingue la institución en la salida: por nombre de archivo, por `Portafolio` o con otra columna?
 4. **Fechas.** ¿`FechaProceso` es el cierre de la cartola en los saldos? ¿Y en los movimientos, la fecha del movimiento o la del cierre?
