@@ -77,15 +77,14 @@ La skill consulta la API de solo lectura de DataFondosv2 (`/api/v1`) con dos var
 | `DATAFONDOS_API_KEY` | Una API key nominal con el scope `valores:read`. |
 | `DATAFONDOS_TIMEOUT` | Opcional: segundos por consulta (20 por defecto). |
 
-1. Crear la key en el servidor de DataFondosv2 (la entrega una sola vez): `python scripts/manage_api_keys.py create --consumer interprete-cartolas --scope valores:read`.
-2. En el computador donde corre la skill, guardarlas como variables de entorno del usuario. En Windows, en una terminal:
+1. Crear la key en la terminal del contenedor de Gestión de DataFondosv2 (en Coolify: el recurso → *Terminal*). La entrega una sola vez:
 
    ```
-   setx DATAFONDOS_API_URL "https://<host de DataFondos>/api/v1"
-   setx DATAFONDOS_API_KEY "<key>"
+   python scripts/manage_api_keys.py create --consumer interprete-cartolas --scope valores:read --expires-at 2027-10-14
    ```
 
-   y abrir de nuevo Claude Code o la terminal para que las tome.
+   Con nombre propio y vencimiento se puede revocar o renovar sin tocar las keys de los demás consumidores.
+2. En el computador donde corre la skill, guardarlas como variables de entorno del usuario. En Windows, en *Editar las variables de entorno de esta cuenta*: así la key no queda en el historial de ninguna terminal. Después cerrar y volver a abrir la app de Claude o la terminal: las variables nuevas solo las ven los programas que se abren después.
 3. Comprobar la conexión desde la carpeta de la skill: `python -m cartolas.datafondos` actualiza la cobertura e informa cuántos fondos sigue DataFondos.
 
 La key no va en ningún archivo del repositorio ni de la skill. A DataFondos solo se le envían el RUT y el nemotécnico de fondos, nunca datos de clientes. Sin las variables, la skill funciona igual con las tablas que trae y, si Claude Code tiene el conector de DataFondos, `skill/SKILL.md` le indica cómo consultarlo por el MCP.
