@@ -184,3 +184,16 @@ def test_un_dividendo_en_dolares_de_un_fondo_vendido_toma_la_moneda_del_abono():
     security._Lector(c)._corregir_monedas()
     (m,) = c.movimientos_titulos
     assert (m.moneda, m.monto) == ("USD", D("143.35"))
+
+
+def test_un_movimiento_de_caja_sin_descripcion_toma_el_tipo_de_su_codigo_de_operacion():
+    # Una nota de crédito (NE) que abona una factura del día anterior viene sin descripción.
+    c = _cartola()
+    lector = security._Lector(c)
+    lector.caja = security._BloqueCaja("CLP", "", None)
+    celdas = {"FECHA": "25/06/2021", "NUMERO CUENTA": "0", "OPERACIÓN": "NE", "DOCUMENTO": "1", "CARGO": "0", "ABONO": "1.000", "SALDO": "1.000"}
+    lector._movimiento_caja(security._Fila(celdas=celdas))
+    celdas = {**celdas, "OPERACIÓN": "ZZ", "DOCUMENTO": "2", "SALDO": "2.000"}
+    lector._movimiento_caja(security._Fila(celdas=celdas))
+    assert [m.tipo for m in c.movimientos_caja] == ["NOTA DE CREDITO ELECTRONICA", "OPERACIÓN ZZ"]
+    assert len([a for a in c.avisos if "sin descripción" in a]) == 2

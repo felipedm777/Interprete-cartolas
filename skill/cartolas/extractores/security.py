@@ -52,6 +52,12 @@ TIPOS_CAJA = {
     ("Factura Ele. Compra Acciones", "USD"): "FACTURA COMPRA RV EN USD",
     ("Cargo en Cuenta Corriente para Inversión en FM", "CLP"): "CARGO COMPROMISO DE INVERSION $ OWP",
 }
+# Movimientos de caja que vienen sin descripción, por su código de OPERACIÓN (FE
+# factura electrónica, DI dividendo, DC disminución de capital, MO moneda
+# extranjera, DA depósito o cargo, RG retiro). NE es una nota de crédito: en la
+# muestra abona, al día siguiente y por el mismo monto, una factura de compra.
+_SIN_DESCRIPCION = {"NE": "Nota de Credito Electronica"}
+
 # Abono de una disminución de capital, como lo deja _tipo_caja para "Disminucion
 # de Capital <nemo> - Abono en Cuenta Mercantil".
 TIPO_DISMINUCION = "DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL"
@@ -801,6 +807,14 @@ class _Lector:
             return
         cuenta = fila.texto("NUMERO CUENTA")
         descripcion = re.sub(r"\s+", " ", fila.texto("DESCRIPCIÓN", "DESCRIPCION"))
+        if not descripcion:
+            # El tipo no puede quedar vacío: se toma el del código de operación.
+            codigo = fila.texto("OPERACI")
+            descripcion = _SIN_DESCRIPCION.get(codigo, f"Operación {codigo}".strip())
+            self.cartola.avisos.append(
+                f"Movimiento de caja del {fila.texto('FECHA')} sin descripción (operación {codigo or 'sin código'}, "
+                f"documento {fila.texto('DOCUMENTO')}): va como {descripcion.upper()}"
+            )
         saldo = fila.monto("SALDO")
         if descripcion == "Saldo Inicial":
             self._cerrar_caja()
