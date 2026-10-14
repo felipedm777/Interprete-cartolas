@@ -14,6 +14,7 @@ Reglas tomadas del export de ejemplo (docs/formato-salida.md):
   (euros) se valorizan en pesos; la caja en euros, en euros.
 """
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
@@ -29,7 +30,7 @@ from .formato import (
     SALDOS_CAJA,
     SALDOS_FFMM,
 )
-from .modelo import Cartola, Cuenta, MovimientoTitulo, Posicion
+from .modelo import Cartola, Cuenta, MovimientoCaja, MovimientoTitulo, Posicion
 from .validar import destino
 
 # Archivo y producto según la tabla de la cartola, para instrumentos que no están
@@ -170,7 +171,11 @@ def generar(cartola: Cartola, catalogo: Catalogo, portafolio: str | None = None)
             continue
         if m.tipo in _MOVIMIENTOS_DOLAR:
             producto, instrumento = "FORWARDS DIVISA", "DOLAR"
-        elif m.instrumento and any(x in _sin_tildes(m.tipo) for x in ("DIVIDENDO", "DISMINUCION", "REPARTO")):
+        elif (
+            m.instrumento
+            and not _pago_al_banco(m)
+            and any(x in _sin_tildes(m.tipo) for x in ("DIVIDENDO", "DISMINUCION", "REPARTO"))
+        ):
             # Como en el export, los dividendos van con el instrumento y su producto;
             # el resto de los movimientos, con la caja.
             datos = catalogo.buscar_nemotecnico(m.instrumento)
@@ -228,6 +233,14 @@ def generar(cartola: Cartola, catalogo: Catalogo, portafolio: str | None = None)
         else:
             salida.agregar(MOVIMIENTOS_BOLSA.tipo, fila)
     return salida
+
+
+def _pago_al_banco(m: MovimientoCaja) -> bool:
+    """Si es el cargo que traspasa al banco del cliente un dividendo ya abonado
+    ("PAGO DIVIDENDO DP SAN …" en Security): es una salida de caja, no un
+    dividendo del fondo, y va como caja aunque nombre el fondo. Un cargo que
+    revierte el dividendo ("REG. GENERACION DIVIDENDO …") sí es del fondo."""
+    return m.cargo > m.abono and re.match(r"PAGO (DE )?DIVIDENDO", _sin_tildes(m.tipo)) is not None
 
 
 def _sin_tildes(texto: str) -> str:

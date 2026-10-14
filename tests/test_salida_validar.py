@@ -225,6 +225,26 @@ def test_dividendo_con_instrumento():
     assert (reparto["Instrumento"], reparto["Producto"]) == ("CFI-Y", "CFI")
 
 
+def test_el_pago_al_banco_de_un_dividendo_va_como_caja():
+    # Security abona el dividendo con el nemotécnico y, el mismo día, lo traspasa al
+    # banco del cliente con un cargo que también lo nombra: el cargo es caja.
+    c = _cartola()
+    c.movimientos_caja[1].instrumento = "CFI-Y"
+    c.movimientos_caja.append(
+        MovimientoCaja(date(2026, 1, 6), "0", "PAGO DIVIDENDO DP SAN 12345678", "CLP", D("50"), D("0"), instrumento="CFI-Y")
+    )
+    # Un cargo que revierte el dividendo sí es del fondo.
+    c.movimientos_caja.append(
+        MovimientoCaja(
+            date(2026, 1, 20), "0", "CARGO EN CUENTA CORRIENTE REG. GENERACION DIVIDENDO 06-01-2026", "CLP", D("50"), D("0"), instrumento="CFI-Y"
+        )
+    )
+    _, dividendo, pago, reversa = generar(c, CATALOGO).filas["MOVIMIENTOS_DE_CAJA"]
+    assert (dividendo["Instrumento"], dividendo["Producto"], dividendo["abono"]) == ("CFI-Y", "CFI", D("50"))
+    assert (pago["Instrumento"], pago["Producto"], pago["cargo"]) == ("CAJA CLP", "CUENTAS CAJA", D("50"))
+    assert (reversa["Instrumento"], reversa["Producto"], reversa["cargo"]) == ("CFI-Y", "CFI", D("50"))
+
+
 def test_disminucion_de_capital_con_tilde_va_con_su_instrumento():
     c = _cartola()
     c.movimientos_caja.append(
