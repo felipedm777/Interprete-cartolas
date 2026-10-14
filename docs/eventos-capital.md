@@ -227,15 +227,24 @@ Para cada abono de los tipos de `TIPOS_CAJA` (los cargos `PAGO DE DIVIDENDOS`
 son el pago al cliente de un dividendo ya abonado, no el evento, y el export los
 deja como caja):
 
-1. Se buscan los eventos de los instrumentos que la cuenta tiene en cartera, de
-   la clase que corresponde al tipo del movimiento (un `REPARTO DE DINERO` acepta
-   tanto `REPARTO DE CAPITAL` como `DISMINUCION DE CAPITAL`: la Bolsa y las
-   cartolas le ponen los dos nombres al mismo hecho), en la moneda del abono y
-   con fecha de pago entre 6 días después y 12 días antes de la fecha del abono.
-2. El evento explica el abono si `MontoPorCuota × cuotas de la cuenta` da el
-   monto abonado, con holgura de 0,5 % y un piso de 1 peso (o 0,5 dólares) por
-   el redondeo de la cartola, **o** si la cartola trae el movimiento de títulos
-   del evento con el mismo monto por cuota publicado.
+1. Se buscan los eventos de los instrumentos que la cuenta tuvo en el período
+   (los del cierre y los de sus movimientos de títulos, que pudo vender antes
+   del cierre), de la clase que corresponde al tipo del movimiento (un `REPARTO
+   DE DINERO` acepta tanto `REPARTO DE CAPITAL` como `DISMINUCION DE CAPITAL`:
+   la Bolsa y las cartolas le ponen los dos nombres al mismo hecho), en la
+   moneda del abono y con fecha de pago entre 6 días después y 12 días antes de
+   la fecha del abono o de la del movimiento de títulos con el mismo número de
+   operación (Security liquida algunos dividendos en dólares semanas después
+   del evento).
+2. El evento explica el abono si `MontoPorCuota × cuotas` da el monto abonado,
+   con holgura de 0,5 % y un piso de 1 peso (o 0,5 dólares) por el redondeo de
+   la cartola, con las cuotas del cierre o las de la fecha límite (las del
+   cierre menos lo que sumaron después las compras, ventas, llamados de capital,
+   liquidaciones y traspasos), **o** si la cartola trae el movimiento de títulos
+   del evento con el mismo monto por cuota publicado, comparado con los
+   decimales del que trae menos. Para el movimiento de títulos vale también un
+   evento anulado: una disminución por rescate de cuotas no baja el valor cuota,
+   pero le paga a quien rescata.
 3. Si un solo instrumento lo explica y el movimiento no traía instrumento, se le
    pone ese nemotécnico. Si lo explican varios, o ninguno, el abono queda
    **dudoso**: se informa en el reporte y la fila sale como caja, nunca con un
@@ -244,9 +253,11 @@ deja como caja):
    `dividendos.py`) y el monto cuadra, queda **confirmado** y entra como
    cuadratura. Si para ese instrumento hay un evento de la fecha y el monto no
    cuadra, es una cuadratura que **no cierra**: la cartola y lo publicado se
-   contradicen y hay que mirarlo. Si no hay ningún evento de ese instrumento en
-   la fecha, queda **sin comprobar**: sale con el instrumento de la cartola y se
-   anota en el reporte.
+   contradicen y hay que mirarlo. También si el monto cuadra con un evento de
+   otra clase (la cartola dice dividendo y la fuente publica un reparto de
+   capital, o al revés): el reporte dice cuál. Si no hay ningún evento de ese
+   instrumento en la fecha, queda **sin comprobar**: sale con el instrumento de
+   la cartola y se anota en el reporte.
 
 El paso 2 por monto por cuota impreso importa porque las cuotas del cierre no
 son siempre las que tenían derecho al reparto: si el cliente compró después de
@@ -260,6 +271,12 @@ Los nemotécnicos se comparan sin guiones ni espacios: un mismo fondo y serie se
 escribe `CFI-AMG3RE` o `CFIAMG3R-E`, el export de BICE usa los dos, DataFondos a
 veces publica solo uno y la Bolsa pone uno en la columna de pesos y el otro en la
 de dólares.
+
+Las cuotas de un fondo de inversión que el cliente tiene directo en la AGF van
+en el export con un nemotécnico propio (`FIP-FI FULLY FUNDED-SERIE A`), y la
+Bolsa publica sus repartos con el de bolsa (`CFI-SPFFAE`).
+`datos/equivalencias.csv` une los dos: las cuotas se buscan en la tabla con el
+de bolsa.
 
 ## Agregar una institución nueva
 
@@ -275,12 +292,18 @@ monto por cuota, si los trae).
 - **Fondos que no se transan en la Bolsa y DataFondos no sigue.** Quedan
   dudosos y el detalle los nombra.
 - **Disminuciones de capital por rescate de cuotas.** El fondo paga un precio
-  por cuota rescatada, no un monto por cada cuota en circulación, y la Bolsa no
-  las publica en la hoja de repartos: salen con el instrumento de la cartola y
-  quedan sin comprobar.
-- **Abonos anteriores a la tabla de la Bolsa.** La tabla guarda los pagos desde
-  el 1 de enero del año anterior al Excel; para cartolas más antiguas hay que
-  regenerarla con `--desde`.
+  por cuota rescatada, no un monto por cada cuota en circulación. Se comprueban
+  solo si la cartola imprime el movimiento de títulos con ese precio (Security)
+  y la fuente lo publica; si no, salen con el instrumento de la cartola y quedan
+  sin comprobar.
+- **Abonos anteriores a las tablas.** La tabla de la Bolsa guarda los pagos
+  desde el 1 de enero del año anterior al Excel y la de DataFondos, los que se
+  le fueron agregando. Para una cartola de varios años hay que regenerar la de
+  la Bolsa con `--desde` y agregar los `dividendos` de DataFondos con `--desde`
+  el comienzo del período de la cartola.
+- **Canjes entre series.** Un canje no dice hacia qué serie mueve las cuotas, así
+  que no entra en las cuotas de la fecha límite: esos abonos se comprueban con
+  las cuotas del cierre o con el movimiento de títulos.
 - **Dividendos reinvertidos.** No pasan por la caja, así que no hay abono que
   explicar; siguen apareciendo como aporte al fondo.
 

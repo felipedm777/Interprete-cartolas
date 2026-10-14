@@ -26,6 +26,11 @@ RUTA_TABLA = Path(__file__).parent / "datos" / "instrumentos.csv"
 # comparando cantidad y precio promedio de compra del mismo cliente y cuenta o,
 # si el cliente no está en el export, nombre, serie, moneda y valor cuota.
 RUTA_ALIAS = Path(__file__).parent / "datos" / "alias.csv"
+# Nemotécnico con que la Bolsa y DataFondos publican los repartos de un fondo
+# que el export nombra con otro: las cuotas de un fondo de inversión que el
+# cliente tiene directo en la AGF van con un nemotécnico propio del export
+# ("FIP-FI FULLY FUNDED-SERIE A") y no con el de bolsa ("CFI-SPFFAE").
+RUTA_EQUIVALENCIAS = Path(__file__).parent / "datos" / "equivalencias.csv"
 
 _COLUMNAS = (
     "Instrumento",
@@ -60,8 +65,14 @@ def _clave(nombre: str) -> str:
 
 
 class Catalogo:
-    def __init__(self, instrumentos: list[Instrumento], alias: dict[tuple[str, str], str] | None = None):
+    def __init__(
+        self,
+        instrumentos: list[Instrumento],
+        alias: dict[tuple[str, str], str] | None = None,
+        equivalencias: dict[str, str] | None = None,
+    ):
         self.instrumentos = instrumentos
+        self._bolsa = {_clave(n): b for n, b in (equivalencias or {}).items()}
         self._exacto: dict[str, list[Instrumento]] = defaultdict(list)
         self._normalizado: dict[str, list[Instrumento]] = defaultdict(list)
         self._nemotecnico: dict[tuple[str, str], Instrumento] = {}
@@ -73,7 +84,12 @@ class Catalogo:
         self._alias = {(_clave(n), m): nemo for (n, m), nemo in (alias or {}).items()}
 
     @classmethod
-    def cargar(cls, ruta: Path = RUTA_TABLA, ruta_alias: Path = RUTA_ALIAS) -> "Catalogo":
+    def cargar(
+        cls,
+        ruta: Path = RUTA_TABLA,
+        ruta_alias: Path = RUTA_ALIAS,
+        ruta_equivalencias: Path = RUTA_EQUIVALENCIAS,
+    ) -> "Catalogo":
         if not ruta.exists():
             return cls([])
         with open(ruta, encoding="utf-8", newline="") as f:
@@ -83,6 +99,11 @@ class Catalogo:
             with open(ruta_alias, encoding="utf-8", newline="") as f:
                 for r in csv.DictReader(f, delimiter=";"):
                     alias[(r["NombreCartola"], r["MonedaInstrumento"])] = r["NemotecnicoInstrumento"]
+        equivalencias = {}
+        if ruta_equivalencias.exists():
+            with open(ruta_equivalencias, encoding="utf-8", newline="") as f:
+                for r in csv.DictReader(f, delimiter=";"):
+                    equivalencias[r["NemotecnicoInstrumento"]] = r["NemotecnicoBolsa"]
         return cls(
             [
                 Instrumento(
@@ -100,7 +121,12 @@ class Catalogo:
                 for r in filas
             ],
             alias,
+            equivalencias,
         )
+
+    def nemo_bolsa(self, nemotecnico: str) -> str:
+        """Nemotécnico con que la Bolsa y DataFondos publican los repartos de ese instrumento."""
+        return self._bolsa.get(_clave(nemotecnico), nemotecnico)
 
     def buscar_nemotecnico(self, nemotecnico: str, moneda: str | None = None) -> Instrumento | None:
         candidatos = [i for i in self.instrumentos if _clave(i.nemotecnico) == _clave(nemotecnico)]
