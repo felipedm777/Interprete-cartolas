@@ -42,6 +42,7 @@ import csv
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -117,6 +118,24 @@ TIPOS_CAJA = {
     "REPARTO DE DINERO EN USD": (REPARTO, "USD"),
     "DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL": (DISMINUCION, ""),
     "ABONO POR DISMINUCION DE CAPITAL": (DISMINUCION, ""),
+    # Security: "Abono a Cuenta Corriente Disminución De Capital <nemo>".
+    "ABONO A CUENTA CORRIENTE DISMINUCION DE CAPITAL": (DISMINUCION, ""),
+}
+
+# Movimientos de títulos que cambian las cuotas del cliente, con su signo: con
+# ellos se reconstruyen, desde las cuotas del cierre, las que tenía en la fecha
+# límite de un reparto. No están los que no dicen hacia dónde mueven las cuotas
+# (un canje entre series, una disminución de capital que a veces rescata cuotas
+# y a veces no).
+_CAMBIAN_CUOTAS = {
+    "COMPRA RV": 1,
+    "VENTA RV": -1,
+    "INVERSION CFI": 1,
+    "RESCATE CFI": -1,
+    "LLAMADO DE CAPITAL": 1,
+    "LIQUIDACION": -1,
+    "INGRESO DE TITULOS": 1,
+    "EGRESO DE TITULOS": -1,
 }
 
 # Movimientos de títulos que la cartola imprime por el mismo evento, con el
@@ -134,6 +153,9 @@ TIPOS_TITULOS = {
 # y las cartolas tampoco coinciden. Al buscar el evento de un abono se aceptan
 # las dos clases.
 _EQUIVALENTES = {REPARTO: (REPARTO, DISMINUCION), DISMINUCION: (DISMINUCION, REPARTO)}
+# Clases de evento que pagan dinero, para avisar cuando la cartola llama
+# dividendo a lo que la fuente publica como reparto de capital, o al revés.
+_PAGAN = (DIVIDENDO, REPARTO, DISMINUCION)
 
 # La cartola fecha el abono cuando el dinero entra o se devenga en la caja, que
 # puede ser días antes o después de la fecha de pago que informa el fondo.
@@ -199,7 +221,8 @@ def clase_de(texto: str) -> str:
     t = texto.upper()
     if "DIVIDENDO" in t:
         return DIVIDENDO
-    if "REPARTO" in t:
+    # DataFondos abrevia a veces: "REP. VOLUNTARIO $ 1362,4213".
+    if "REPARTO" in t or re.match(r"REP\.?\s", t):
         return REPARTO
     if "DISMINUC" in t:
         return DISMINUCION
@@ -304,14 +327,21 @@ class Tabla:
         fechas = [e.fecha_pago for e in eventos if e.fecha_pago]
         return (min(fechas), max(fechas)) if fechas else None
 
-    def buscar(self, nemotecnico: str, clase: str, fecha: date, moneda: str = "") -> list[Evento]:
-        """Eventos de ese fondo que pueden pagar un abono de esa clase en esa fecha."""
+    def buscar(
+        self, nemotecnico: str, clase: str, fecha: date, moneda: str = "", anulados: bool = False
+    ) -> list[Evento]:
+        """Eventos de ese fondo que pueden pagar un abono de esa clase en esa fecha.
+
+        Con ``anulados`` incluye los excluidos del valor cuota: una disminución de
+        capital por rescate de cuotas no baja el valor cuota, pero paga a quien
+        rescata.
+        """
         clases = _EQUIVALENTES.get(clase, (clase,))
         return [
             e
             for e in self._por_nemo.get(_nemo_clave(nemotecnico), [])
             if e.clase in clases
-            and not e.anulado
+            and (anulados or not e.anulado)
             and e.monto_por_cuota
             and e.fecha_pago
             and -timedelta(days=_DIAS_ANTES) <= fecha - e.fecha_pago <= timedelta(days=_DIAS_DESPUES)
@@ -397,6 +427,13 @@ def _nemo_clave(nemotecnico: str) -> str:
     return re.sub(r"[\s-]", "", nemotecnico.upper())
 
 
+def tipo_caja(tipo: str) -> tuple[str, str] | None:
+    """Clase de evento y moneda que paga ese tipo de movimiento de caja, sin
+    mirar tildes ("DISMINUCIÓN" y "DISMINUCION" llegan las dos), o None."""
+    sin_tildes = unicodedata.normalize("NFKD", tipo).encode("ascii", "ignore").decode()
+    return TIPOS_CAJA.get(sin_tildes)
+
+
 def _parece_fondo(nemotecnico: str) -> bool:
     """Si el nemotécnico es de un fondo, los únicos que sigue DataFondos.
 
@@ -417,8 +454,9 @@ def _cuadra(esperado: Decimal, monto: Decimal, moneda: str) -> bool:
 
 def _mismo_por_cuota(impreso: Decimal, publicado: Decimal) -> bool:
     """Si el monto por cuota impreso en la cartola es el publicado, comparado
-    con los decimales que imprime la cartola."""
-    decimales = min(-impreso.as_tuple().exponent, 8)
+    con los decimales del que trae menos: la cartola puede imprimir 1377,7662
+    y la fuente publicar 1377,77."""
+    decimales = min(-impreso.as_tuple().exponent, -publicado.as_tuple().exponent, 8)
     if decimales <= 0:
         return False
     unidad = Decimal(1).scaleb(-decimales)
@@ -492,12 +530,18 @@ def _conciliar_cartola(
     resultado = Conciliacion()
     if not len(tabla):
         return resultado
-    cuotas = _cuotas_por_cuenta(cartola, catalogo)
-    titulos = _titulos_por_cuenta(cartola, catalogo)
+    # Todo va por la clave del nemotécnico (sin guiones), con el nemotécnico a
+    # mostrar en `nombres`: el mismo fondo llega escrito de dos formas.
+    nombres: dict[str, str] = {}
+    cuotas = _cuotas_por_cuenta(cartola, catalogo, nombres)
+    titulos = _titulos_por_cuenta(cartola, catalogo, nombres)
+    cambios = _cambios_de_cuotas(cartola, catalogo, nombres)
+    operaciones = {(t.cuenta, t.referencia): t for ts in titulos.values() for t in ts if t.referencia}
     for m in cartola.movimientos_caja:
-        if m.tipo not in TIPOS_CAJA:
+        tipo = tipo_caja(m.tipo)
+        if tipo is None:
             continue
-        clase, moneda_tipo = TIPOS_CAJA[m.tipo]
+        clase, moneda_tipo = tipo
         moneda = moneda_tipo or m.moneda
         monto = _monto(m)
         if monto <= 0:
@@ -505,23 +549,55 @@ def _conciliar_cartola(
             # ya abonado, no el evento: el export lo deja como caja.
             continue
         posiciones = cuotas.get(m.cuenta, {})
-        # (nemotécnico, evento) que explican el abono: por el monto por cuota que
-        # la cartola imprime en el movimiento de títulos del mismo evento, o por
-        # las cuotas que la cuenta tiene en el fondo.
-        explican = [
-            (nemo, e)
-            for nemo, cantidad in posiciones.items()
-            for e in tabla.buscar(nemo, clase, m.fecha, moneda)
-            if _cuadra(e.monto_por_cuota * cantidad, monto, moneda)
-            or _explica_titulo(titulos.get((m.cuenta, nemo), []), e, monto, moneda)
-        ]
+        # Los fondos que la cuenta tuvo en el período: los del cierre y los de sus
+        # movimientos de títulos, que pudo vender antes del cierre.
+        claves = list(dict.fromkeys([*posiciones, *(k for c, k in [*titulos, *cambios] if c == m.cuenta)]))
+        # El abono puede llegar días después del evento (un dividendo en dólares
+        # que se liquida después): el movimiento de títulos con el mismo número
+        # de operación trae la fecha del evento.
+        operacion = operaciones.get((m.cuenta, m.folio)) if m.folio else None
+        fechas = [m.fecha] + ([operacion.fecha] if operacion else [])
+
+        def explican(clave: str, clase: str) -> list[Evento]:
+            """Eventos del fondo que explican el abono: por las cuotas del cierre o
+            de la fecha límite, o por el monto por cuota que la cartola imprime en
+            el movimiento de títulos del mismo evento."""
+            cierre = posiciones.get(clave, Decimal(0))
+            eventos = dict.fromkeys(
+                e for f in fechas for e in tabla.buscar(clave, clase, f, moneda, anulados=True)
+            )
+            return [
+                e
+                for e in eventos
+                if (
+                    not e.anulado
+                    and any(
+                        q and _cuadra(e.monto_por_cuota * q, monto, moneda)
+                        for q in {cierre, _cuotas_al(cierre, cambios.get((m.cuenta, clave), []), e)}
+                    )
+                )
+                or _explica_titulo(titulos.get((m.cuenta, clave), []), e, monto, moneda)
+            ]
+
+        explicados = {k: explican(k, clase) for k in claves}
         donde = f"{m.tipo} {moneda} del {m.fecha:%d-%m-%Y}"
         if m.instrumento:
-            propios = [(n, e) for n, e in explican if _nemo_clave(n) == _nemo_clave(m.instrumento)]
-            if propios:
+            propia = _nemo_clave(m.instrumento)
+            otra = None
+            if not explicados.get(propia):
+                otra = next(
+                    (e for c in _PAGAN if c not in _EQUIVALENTES.get(clase, (clase,)) for e in explican(propia, c)),
+                    None,
+                )
+            if explicados.get(propia):
                 resultado.confirmados += 1
-            elif tabla.buscar(m.instrumento, clase, m.fecha, moneda):
-                otros = ", ".join(sorted({n for n, _ in explican}))
+            elif otra:
+                resultado.revisar.append(
+                    f"{donde} va con {m.instrumento}, pero el monto cuadra con un evento publicado como "
+                    f"{otra.clase.lower()} ({otra.texto or otra.fuente}), no como {clase.lower()}"
+                )
+            elif any(tabla.buscar(m.instrumento, clase, f, moneda) for f in fechas):
+                otros = ", ".join(sorted(nombres[k] for k, eventos in explicados.items() if eventos))
                 resultado.revisar.append(
                     f"{donde} va con {m.instrumento}, pero el monto no cuadra con el evento "
                     f"publicado para ese instrumento"
@@ -535,7 +611,7 @@ def _conciliar_cartola(
                     # DataFondos puede tenerlo.
                     resultado.pendientes.add((m.instrumento, f"{m.fecha:%Y-%m}"))
             continue
-        candidatos = sorted({n for n, _ in explican})
+        candidatos = sorted(nombres[k] for k, eventos in explicados.items() if eventos)
         if len(candidatos) == 1:
             if asignar:
                 m.instrumento = candidatos[0]
@@ -545,7 +621,8 @@ def _conciliar_cartola(
             causa, detalle = VARIOS, f"lo explican {', '.join(candidatos)}"
         else:
             estados = {
-                n: _estado(n, clase, m.fecha, moneda, tabla, cobertura) for n in sorted(posiciones)
+                n: _estado(n, clase, m.fecha, moneda, tabla, cobertura)
+                for n in sorted(nombres[k] for k in posiciones)
             }
             causa = (
                 POR_BAJAR
@@ -612,7 +689,8 @@ def _explica_titulo(
     por cuota publicado y el monto del abono."""
     return any(
         t.precio
-        and TIPOS_TITULOS.get(t.tipo) == evento.clase
+        and t.tipo in TIPOS_TITULOS
+        and evento.clase in _EQUIVALENTES.get(TIPOS_TITULOS[t.tipo], (TIPOS_TITULOS[t.tipo],))
         and _mismo_por_cuota(t.precio, evento.monto_por_cuota)
         and (t.monto is None or _cuadra(t.monto, monto, moneda))
         and (
@@ -623,27 +701,57 @@ def _explica_titulo(
     )
 
 
+def _nemo_titulo(t: MovimientoTitulo, catalogo: Catalogo) -> str:
+    """Nemotécnico de bolsa de un movimiento de títulos, o vacío."""
+    nemo = t.nemotecnico
+    if not nemo:
+        i = catalogo.buscar(t.instrumento, t.moneda) or catalogo.buscar_nemotecnico(t.instrumento, t.moneda)
+        nemo = i.nemotecnico if i else ""
+    return catalogo.nemo_bolsa(nemo) if nemo else ""
+
+
 def _titulos_por_cuenta(
-    cartola: Cartola, catalogo: Catalogo
+    cartola: Cartola, catalogo: Catalogo, nombres: dict[str, str]
 ) -> dict[tuple[str, str], list[MovimientoTitulo]]:
-    """Movimientos de títulos por evento de capital, por cuenta y nemotécnico."""
+    """Movimientos de títulos por evento de capital, por cuenta y clave del nemotécnico."""
     titulos: dict[tuple[str, str], list[MovimientoTitulo]] = {}
     for t in cartola.movimientos_titulos:
         if t.tipo not in TIPOS_TITULOS:
             continue
-        nemo = t.nemotecnico
-        if not nemo:
-            i = catalogo.buscar(t.instrumento, t.moneda) or catalogo.buscar_nemotecnico(
-                t.instrumento, t.moneda
-            )
-            nemo = i.nemotecnico if i else ""
+        nemo = _nemo_titulo(t, catalogo)
         if nemo:
-            titulos.setdefault((t.cuenta, nemo), []).append(t)
+            nombres.setdefault(_nemo_clave(nemo), nemo)
+            titulos.setdefault((t.cuenta, _nemo_clave(nemo)), []).append(t)
     return titulos
 
 
-def _cuotas_por_cuenta(cartola: Cartola, catalogo: Catalogo) -> dict[str, dict[str, Decimal]]:
-    """Cuotas por nemotécnico en cada cuenta, sumando las posiciones repetidas."""
+def _cambios_de_cuotas(
+    cartola: Cartola, catalogo: Catalogo, nombres: dict[str, str]
+) -> dict[tuple[str, str], list[tuple[date, Decimal]]]:
+    """Fecha y cuotas que suma (o resta) cada compra, venta, llamado de capital o
+    traspaso, por cuenta y clave del nemotécnico."""
+    cambios: dict[tuple[str, str], list[tuple[date, Decimal]]] = {}
+    for t in cartola.movimientos_titulos:
+        signo = _CAMBIAN_CUOTAS.get(t.tipo)
+        nemo = _nemo_titulo(t, catalogo) if signo and t.cantidad else ""
+        if nemo:
+            nombres.setdefault(_nemo_clave(nemo), nemo)
+            cambios.setdefault((t.cuenta, _nemo_clave(nemo)), []).append((t.fecha, signo * abs(t.cantidad)))
+    return cambios
+
+
+def _cuotas_al(cierre: Decimal, cambios: list[tuple[date, Decimal]], evento: Evento) -> Decimal:
+    """Cuotas en la fecha límite del evento: las del cierre menos lo que sumaron
+    los movimientos posteriores."""
+    fecha = evento.fecha_limite or evento.fecha_pago
+    return cierre - sum((q for f, q in cambios if fecha and f > fecha), Decimal(0))
+
+
+def _cuotas_por_cuenta(
+    cartola: Cartola, catalogo: Catalogo, nombres: dict[str, str]
+) -> dict[str, dict[str, Decimal]]:
+    """Cuotas del cierre por clave del nemotécnico en cada cuenta, sumando las
+    posiciones repetidas."""
     cuentas: dict[str, dict[str, Decimal]] = {}
     for p in cartola.posiciones:
         if not p.cantidad:
@@ -654,8 +762,10 @@ def _cuotas_por_cuenta(cartola: Cartola, catalogo: Catalogo) -> dict[str, dict[s
         nemo = i.nemotecnico if i else p.nemotecnico
         if not nemo:
             continue
+        nemo = catalogo.nemo_bolsa(nemo)
+        nombres.setdefault(_nemo_clave(nemo), nemo)
         cuenta = cuentas.setdefault(p.cuenta, {})
-        cuenta[nemo] = cuenta.get(nemo, Decimal(0)) + p.cantidad
+        cuenta[_nemo_clave(nemo)] = cuenta.get(_nemo_clave(nemo), Decimal(0)) + p.cantidad
     return cuentas
 
 

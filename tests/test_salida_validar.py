@@ -225,6 +225,17 @@ def test_dividendo_con_instrumento():
     assert (reparto["Instrumento"], reparto["Producto"]) == ("CFI-Y", "CFI")
 
 
+def test_disminucion_de_capital_con_tilde_va_con_su_instrumento():
+    c = _cartola()
+    c.movimientos_caja.append(
+        MovimientoCaja(
+            date(2026, 1, 6), "0", "ABONO A CUENTA CORRIENTE DISMINUCIÓN DE CAPITAL", "CLP", D("0"), D("5"), instrumento="CFI-Y"
+        )
+    )
+    disminucion = generar(c, CATALOGO).filas["MOVIMIENTOS_DE_CAJA"][-1]
+    assert (disminucion["Instrumento"], disminucion["Producto"]) == ("CFI-Y", "CFI")
+
+
 def test_caja_en_dolares_que_la_cartola_no_muestra():
     c = _cartola()
     for clave in ("cuenta:1", "grupo:Cuenta de Inversión", "patrimonio"):

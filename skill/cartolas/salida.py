@@ -14,6 +14,7 @@ Reglas tomadas del export de ejemplo (docs/formato-salida.md):
   (euros) se valorizan en pesos; la caja en euros, en euros.
 """
 
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import ROUND_DOWN, Decimal
@@ -169,7 +170,7 @@ def generar(cartola: Cartola, catalogo: Catalogo, portafolio: str | None = None)
             continue
         if m.tipo in _MOVIMIENTOS_DOLAR:
             producto, instrumento = "FORWARDS DIVISA", "DOLAR"
-        elif m.instrumento and any(x in m.tipo for x in ("DIVIDENDO", "DISMINUCION", "REPARTO")):
+        elif m.instrumento and any(x in _sin_tildes(m.tipo) for x in ("DIVIDENDO", "DISMINUCION", "REPARTO")):
             # Como en el export, los dividendos van con el instrumento y su producto;
             # el resto de los movimientos, con la caja.
             datos = catalogo.buscar_nemotecnico(m.instrumento)
@@ -227,6 +228,11 @@ def generar(cartola: Cartola, catalogo: Catalogo, portafolio: str | None = None)
         else:
             salida.agregar(MOVIMIENTOS_BOLSA.tipo, fila)
     return salida
+
+
+def _sin_tildes(texto: str) -> str:
+    # Security escribe "DISMINUCIÓN" y "DISMINUCION" en la misma cartola.
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
 
 
 def _fila_pershing(

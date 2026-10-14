@@ -562,3 +562,15 @@ Uno de los clientes (el de `Document_639264679165525057`) también tiene una car
 **Resultado en las 9 cartolas distintas:** 310 cuadraturas propias más las comunes, todas cierran. Se leen 180 posiciones (17 fondos mutuos, 161 CFI y 2 acciones; 109 previsionales), 22 saldos de caja, 133 movimientos de caja y 126 de títulos (24 a fondos mutuos, 22 a bolsa y 80 dividendos o divisas que no se exportan). 174 de las 180 posiciones están en la tabla maestra.
 
 **Contra el export de ejemplo** (que es de septiembre, después de la migración a BICE): 157 de las 163 filas de CUSTODIA_ACCIONES tienen el mismo RUT y nemotécnico en el export, con el mismo nombre, producto, moneda y emisor, y 123 tienen además la misma cantidad. Las diferencias de producto base (APV PRIME frente a CUENTA INVERSION en 15 filas) vienen de cuentas que BICE reorganizó al migrarlas.
+
+### La cartola Security sola, con años de movimientos
+
+La misma cartola consolidada llega también sola, sin la BICE antigua, y cubriendo varios años desde que se abrió la cuenta. Usa las mismas tablas, con estas diferencias:
+
+- **Cabecera:** `Rut : <RUT>` y `Nombre : <NOMBRE>` vienen en el mismo fragmento que la etiqueta. `_cabecera` acepta el valor pegado o en su propio fragmento.
+- **`FONDOS DE INVERSION`:** un título de 14 pt (como `FONDOS MUTUOS` y `ACCIONES Y CFI`) sobre un bloque `FONDOS SECURITY - USD`, con las columnas de los fondos mutuos. Son fondos de inversión de la AGF Security que el cliente tiene directo en la administradora (p. ej. `FI FULLY FUNDED SERIE A`, el Pantheon Secondary Opportunity Fully Funded), y el resumen de las páginas 1 y 2 los cuenta en `Fondos de Inversión`, no en `Fondos Mutuos`. Salen como `FI SECURITY <nombre>`, tabla `Fondos Inversión Bice`, y van a SALDOS_FFMM con el producto FONDOS INVERSIÓN BICE, como en el export (`FIP-FI FULLY FUNDED-SERIE A`, por alias). La Bolsa publica sus repartos como `CFI-SPFFAE`: `datos/equivalencias.csv` une los dos nemotécnicos para comprobar los abonos.
+- **`TIPO MOVTO` de varios años:** `Llamado Ca` (llamado de capital de un fondo privado, suma cuotas), `Liquidacion` (las retira) e `Ingreso`/`Egreso` (traspasos de custodia, sin precio ni monto). No se exportan; sirven para reconstruir las cuotas de cada fecha (ver `docs/eventos-capital.md`).
+- **Abonos de disminuciones de capital:** `Abono a Cuenta Corriente Disminución De Capital <nemo>` llega con y sin tilde, y es el abono de una disminución de capital. Una disminución por rescate de cuotas (los repartos voluntarios de un fondo Ameris) entra a la caja como `Retiro`, con el número de operación de la `Disminucion de Capital` del informe de transacciones: pasa a `DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL` con ese nemotécnico.
+- **Dividendos en USD de un CFI que ya no está al cierre:** la moneda no sale de la posición, sino del abono en moneda extranjera con el mismo número de operación.
+
+Con esto, todas las cuadraturas de esa cartola cierran.

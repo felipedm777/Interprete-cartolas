@@ -10,7 +10,7 @@ formato está en docs/instituciones/bice-antigua-y-security.md (parte B).
 import re
 import unicodedata
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -52,6 +52,9 @@ TIPOS_CAJA = {
     ("Factura Ele. Compra Acciones", "USD"): "FACTURA COMPRA RV EN USD",
     ("Cargo en Cuenta Corriente para Inversión en FM", "CLP"): "CARGO COMPROMISO DE INVERSION $ OWP",
 }
+# Abono de una disminución de capital, como lo deja _tipo_caja para "Disminucion
+# de Capital <nemo> - Abono en Cuenta Mercantil".
+TIPO_DISMINUCION = "DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL"
 
 # TIPO MOVTO del informe de transacciones (viene truncado) -> (tipo, destino).
 # Los dividendos no se exportan como títulos: los de CFI y acciones ya están en
@@ -65,6 +68,13 @@ TIPOS_TITULOS = {
     "disminucio": ("DISMINUCION DE CAPITAL", "BOLSA"),
     "emision lib": ("EMISION LIBERADA", "BOLSA"),
     "dividendo": ("DIVIDENDO", ""),
+    # Fondos de inversión privados: los llamados de capital suman cuotas y la
+    # liquidación las retira; su caja va en los movimientos de caja.
+    "llamado ca": ("LLAMADO DE CAPITAL", ""),
+    "liquidacio": ("LIQUIDACION", ""),
+    # Traspasos de custodia sin precio ni monto.
+    "ingreso": ("INGRESO DE TITULOS", ""),
+    "egreso": ("EGRESO DE TITULOS", ""),
 }
 # Inversiones y rescates de algo que no es un fondo mutuo (p. ej. un CFI rescatable).
 _TIPOS_NO_FM = {"INVERSION FM": "INVERSION CFI", "RESCATE FM": "RESCATE CFI"}
@@ -134,10 +144,14 @@ def _cabecera(spans: list[Span], archivo: str) -> Cartola:
         e = next((s for s in spans if s.y0 < _Y_PIE and re.match(etiqueta, s.texto)), None)
         if e is None:
             return []
-        return sorted(
+        derecha = sorted(
             (s for s in spans if abs(s.yc - e.yc) < 3 and s.x0 >= e.x1 - 1 and s.x0 < e.x1 + 300),
             key=lambda s: s.x0,
         )
+        # La cartola que viene sola (no pegada a una BICE antigua) imprime la
+        # etiqueta y el valor en un mismo fragmento: "Rut               : 1.111.111-1".
+        pegado = e.texto[re.match(etiqueta, e.texto).end() :].strip()
+        return [replace(e, texto=pegado)] + derecha if pegado else derecha
 
     texto = " ".join(s.texto for s in spans)
     periodo = re.search(r"Desde el (\d{2}-\d{2}-\d{4}) al (\d{2}-\d{2}-\d{4})", texto)
@@ -442,6 +456,10 @@ class _Lector:
         self.cartola = cartola
         self.cuadraturas = _Cuadraturas()
         self.previsional: bool | None = None
+        # Título grande de la sección ("FONDOS MUTUOS", "FONDOS DE INVERSION",
+        # "ACCIONES Y CFI"), normalizado: los fondos de inversión que el cliente
+        # tiene directo en la AGF usan la misma tabla que los fondos mutuos.
+        self.seccion = ""
         self.bloque = ""
         self.columnas: list[Columna] = []
         self.caja: _BloqueCaja | None = None
@@ -467,6 +485,9 @@ class _Lector:
         encabezado: list[Span] = []
         for fila in _filas(spans):
             if any(s.tamano >= 11.5 for s in fila):
+                titulo_seccion = " ".join(s.texto for s in fila if s.tamano >= 13)
+                if titulo_seccion:
+                    self.seccion = _normalizar(titulo_seccion)
                 titulo_bloque = " ".join(s.texto for s in fila if s.tamano >= 11.5 and s.tamano < 13)
                 if titulo_bloque:
                     self._nuevo_bloque(re.sub(r"\s+", " ", titulo_bloque))
@@ -514,7 +535,9 @@ class _Lector:
     def _fila(self, fila: _Fila) -> None:
         bloque = self.bloque
         if bloque.startswith("FONDOS SECURITY"):
-            self._fondo_mutuo(fila, "USD" if bloque.endswith("USD") else "CLP")
+            self._fondo_mutuo(
+                fila, "USD" if bloque.endswith("USD") else "CLP", inversion=self.seccion == "fondos de inversion"
+            )
         elif bloque in ("ACCIONES NACIONALES", "CUOTAS"):
             self._accion_o_cuota(fila, "Acciones" if bloque == "ACCIONES NACIONALES" else "CFI")
         elif bloque == "RESUMEN DE SALDOS EN CAJA":
@@ -556,8 +579,12 @@ class _Lector:
 
     # Posiciones ---------------------------------------------------------------
 
-    def _fondo_mutuo(self, fila: _Fila, moneda: str) -> None:
+    def _fondo_mutuo(self, fila: _Fila, moneda: str, inversion: bool = False) -> None:
+        """Una fila de FONDOS SECURITY: un fondo mutuo o, bajo el título FONDOS DE
+        INVERSION, un fondo de inversión de la AGF Security que el cliente tiene
+        directo en la administradora (p. ej. "FI FULLY FUNDED SERIE A")."""
         sufijo = "(USD)" if moneda == "USD" else "($)"
+        clase = "FI" if inversion else "FM"
         saldo = f"SALDO ACTUAL {sufijo}"
         etiquetas = [f"MONTO INVERTIDO {sufijo}", saldo, "MAYOR O MENOR VALOR"]
         if moneda == "USD":
@@ -579,7 +606,7 @@ class _Lector:
         tolerancia = Decimal("0.005") if moneda == "USD" else _MEDIO
         if None not in (cuotas, valor_cuota, saldo_moneda):
             c.comparar(
-                f"FM {moneda}: cuotas × valor cuota = saldo",
+                f"{clase} {moneda}: cuotas × valor cuota = saldo",
                 cuotas * valor_cuota,
                 saldo_moneda,
                 tolerancia,
@@ -587,7 +614,7 @@ class _Lector:
             )
         if None not in (cuotas, promedio, invertido):
             c.comparar(
-                f"FM {moneda}: cuotas × valor promedio de compra = monto invertido",
+                f"{clase} {moneda}: cuotas × valor promedio de compra = monto invertido",
                 cuotas * promedio,
                 invertido,
                 tolerancia,
@@ -595,7 +622,7 @@ class _Lector:
             )
         if None not in (saldo_moneda, invertido, mayor_menor):
             c.comparar(
-                f"FM {moneda}: saldo − monto invertido = mayor o menor valor",
+                f"{clase} {moneda}: saldo − monto invertido = mayor o menor valor",
                 saldo_moneda - invertido,
                 mayor_menor,
                 Decimal("0.01") if moneda == "USD" else Decimal(1),
@@ -603,7 +630,7 @@ class _Lector:
             )
         if moneda == "USD" and None not in (saldo_moneda, valor_clp, self._cambio("USD")):
             c.comparar(
-                "FM USD: saldo en USD × USD de la cabecera = valorización en $",
+                f"{clase} USD: saldo en USD × USD de la cabecera = valorización en $",
                 saldo_moneda * self._cambio("USD"),
                 valor_clp,
                 _MEDIO,
@@ -617,10 +644,12 @@ class _Lector:
         self._posicion(
             Posicion(
                 cuenta=cuenta,
-                seccion="Fondos Mutuos",
-                tabla="Fondos Mutuos",
+                seccion="Fondos de Inversión" if inversion else "Fondos Mutuos",
+                # Como en el export: los fondos de inversión de la AGF van a
+                # SALDOS_FFMM con el producto FONDOS INVERSIÓN BICE.
+                tabla="Fondos Inversión Bice" if inversion else "Fondos Mutuos",
                 previsional=bool(self.previsional),
-                instrumento=f"FM SECURITY {nombre}",
+                instrumento=f"FI SECURITY {nombre.removeprefix('FI ')}" if inversion else f"FM SECURITY {nombre}",
                 moneda=moneda,
                 cantidad=cuotas,
                 precio_promedio=promedio,
@@ -859,6 +888,7 @@ class _Lector:
         self._controles_caja()
         self._controles_resumen()
         self._completar_fondos()
+        self._vincular_caja()
         self._corregir_monedas()
         self._controles_transacciones()
         self.cartola.controles += self.cuadraturas.controles()
@@ -910,8 +940,9 @@ class _Lector:
         """Detalle contra la página 1 (solo no previsional, salvo APV FFMM/DC) y la 2."""
         cartola, t = self.cartola, self.cartola.totales
         sumas: dict[str, Decimal] = defaultdict(Decimal)
+        clases = {"Fondos Mutuos": "Fondos Mutuos", "Fondos Inversión Bice": "Fondos de Inversión"}
         for p in cartola.posiciones:
-            clase = "Fondos Mutuos" if p.tabla == "Fondos Mutuos" else "Acciones y CFI"
+            clase = clases.get(p.tabla, "Acciones y CFI")
             sumas[f"productos:{clase}"] += p.valor_clp or _CERO
             if p.previsional:
                 if clase == "Fondos Mutuos":
@@ -924,8 +955,18 @@ class _Lector:
                 sumas[f"resumen:{nombres[s.moneda]}"] += s.monto_clp or _CERO
         reglas = (
             ("productos:Fondos Mutuos", "Suma de fondos mutuos = Por productos: Fondos Mutuos", 2),
+            (
+                "productos:Fondos de Inversión",
+                "Suma de fondos de inversión de la AGF = Por productos: Fondos de Inversión",
+                2,
+            ),
             ("productos:Acciones y CFI", "Suma de acciones y CFI = Por productos: Acciones y CFI", 5),
             ("resumen:Fondos Mutuos", "Fondos mutuos no previsionales = Resumen inversión: Fondos Mutuos", 2),
+            (
+                "resumen:Fondos de Inversión",
+                "Fondos de inversión de la AGF no previsionales = Resumen inversión: Fondos de Inversión",
+                2,
+            ),
             (
                 "resumen:Acciones y CFI",
                 "Acciones y CFI no previsionales = Resumen inversión: Acciones y CFI",
@@ -969,13 +1010,36 @@ class _Lector:
         for nombre in sorted(sin_serie):
             self.cartola.avisos.append(f"Transacciones de {nombre}: no se pudo deducir la serie del fondo")
 
+    def _vincular_caja(self) -> None:
+        """Completa el instrumento de los abonos de caja que no lo nombran, con el
+        movimiento de títulos del mismo número de operación.
+
+        Una disminución de capital por rescate de cuotas (p. ej. los repartos
+        voluntarios de un fondo Ameris) entra a la caja como "Retiro", con el
+        número de la operación "Disminucion de Capital" del informe de
+        transacciones: es el abono de esa disminución.
+        """
+        por_operacion: dict[tuple[str, str], MovimientoTitulo] = {}
+        for t in self.cartola.movimientos_titulos:
+            if t.referencia and t.nemotecnico and t.tipo in ("DIVIDENDO", "DISMINUCION DE CAPITAL"):
+                por_operacion.setdefault((t.cuenta, t.referencia), t)
+        for m in self.cartola.movimientos_caja:
+            t = por_operacion.get((m.cuenta, m.folio)) if m.folio and not m.instrumento else None
+            if t is None or not m.abono:
+                continue
+            m.instrumento = t.nemotecnico
+            if m.tipo == "RETIRO" and t.tipo == "DISMINUCION DE CAPITAL":
+                m.tipo = TIPO_DISMINUCION
+
     def _corregir_monedas(self) -> None:
         """Corrige la MDA de las transacciones de CFI en moneda extranjera.
 
         En los dividendos de CFI en USD el precio está en USD y el monto en pesos,
         y en las compras de CFI en EUR cantidad × precio da el monto en euros,
         aunque la MDA diga CLP en los dos casos. La moneda del CFI sale de su
-        precio de cierre en el detalle de inversiones.
+        precio de cierre en el detalle de inversiones; la de un dividendo de un
+        CFI que ya no está al cierre, del abono en moneda extranjera con el mismo
+        número de operación.
         """
         cartola = self.cartola
         monedas: dict[tuple[str, str], str] = {}
@@ -983,18 +1047,21 @@ class _Lector:
             if p.nemotecnico:
                 monedas[(p.cuenta, p.nemotecnico)] = p.moneda
                 monedas.setdefault(("", p.nemotecnico), p.moneda)
-        abonos = {(m.cuenta, m.folio, m.instrumento, m.moneda): m.abono for m in cartola.movimientos_caja}
+        abonos: dict[tuple[str, str, str], tuple[str, Decimal]] = {}
+        for m in cartola.movimientos_caja:
+            if m.abono and m.moneda != "CLP":
+                abonos.setdefault((m.cuenta, m.folio, m.instrumento), (m.moneda, m.abono))
         dividendos = []
         for m in cartola.movimientos_titulos:
             moneda = monedas.get((m.cuenta, m.nemotecnico)) or monedas.get(("", m.nemotecnico))
-            if not m.nemotecnico or m.moneda != "CLP" or moneda in (None, "CLP"):
+            if not m.nemotecnico or m.moneda != "CLP" or moneda == "CLP":
                 continue
             if m.tipo == "DIVIDENDO":
-                abono = abonos.get((m.cuenta, m.referencia, m.nemotecnico, moneda))
-                if abono:
+                moneda_abono, abono = abonos.get((m.cuenta, m.referencia, m.nemotecnico), ("", None))
+                if abono and moneda in (None, moneda_abono):
                     dividendos.append(m.nemotecnico)
-                    m.moneda, m.monto = moneda, abono
-            elif _cuadra(m.cantidad, m.precio, m.monto):
+                    m.moneda, m.monto = moneda_abono, abono
+            elif moneda is not None and _cuadra(m.cantidad, m.precio, m.monto):
                 cartola.avisos.append(
                     f"{m.tipo} {m.instrumento} cuenta {m.cuenta} del {m.fecha:%d-%m-%Y}: "
                     f"MDA CLP, pero cantidad × precio da el monto en {moneda}; se toma {moneda}"

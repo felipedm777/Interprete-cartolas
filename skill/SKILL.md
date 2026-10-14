@@ -5,7 +5,7 @@ description: Lee cartolas PDF de inversiones (BICE, Valores Security, Larrainvia
 
 # Intérprete de cartolas
 
-**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas, la cartola Valores Security que viene pegada a ellas, los informes Larrainvial, las cartolas mensuales Sura y los estados Pershing (`docs/inventario.md`). Sura y Pershing no traen RUT: esas filas salen con `RutCliente` vacío para completarlo después.
+**Estado:** lee las cartolas BICE nuevas (desde septiembre de 2026), las BICE antiguas, la cartola Valores Security (pegada a ellas o sola, también la consolidada de varios años), los informes Larrainvial, las cartolas mensuales Sura y los estados Pershing (`docs/inventario.md`). Sura y Pershing no traen RUT: esas filas salen con `RutCliente` vacío para completarlo después.
 
 ## Cómo usarla
 
@@ -51,7 +51,7 @@ La corrida pone al día sola las tablas de la skill antes de conciliar, y lo que
 Si algo de eso falla (sin internet, sin las variables, una key sin permiso), la corrida sigue con las tablas que tiene y el reporte dice qué no se pudo hacer. En ese caso:
 
 1. Sin el Excel al día: bajarlo con `python -m cartolas.bolsa --carpeta <carpeta de salida>/bolsa`, o pasar uno ya bajado: `python -m cartolas.bolsa <archivo.xlsx>`. Revisar que la última línea diga que los eventos "cuadran con el Excel" y mirar las filas descartadas y los dudosos que informa por hoja.
-2. Sin la API de DataFondos pero con su MCP conectado: llamar `resumen_dividendos`, guardar la respuesta completa en `<carpeta de salida>/datafondos/resumen.json` y agregarla con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/resumen.json`. Si el reporte trae la tabla "Fondos por consultar en DataFondos", llamar `dividendos` con el RUT y el nemotécnico de cada fila, guardar cada respuesta en `<carpeta de salida>/datafondos/<nemotécnico>.json` y agregarlas con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/*.json --desde <1 de enero del año anterior>`.
+2. Sin la API de DataFondos pero con su MCP conectado: llamar `resumen_dividendos`, guardar la respuesta completa en `<carpeta de salida>/datafondos/resumen.json` y agregarla con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/resumen.json`. Si el reporte trae la tabla "Fondos por consultar en DataFondos", llamar `dividendos` con el RUT y el nemotécnico de cada fila, guardar cada respuesta en `<carpeta de salida>/datafondos/<nemotécnico>.json` y agregarlas con `python -m cartolas.eventos_capital <carpeta de salida>/datafondos/*.json --desde <1 de enero del año anterior>`. Para una cartola de varios años, usar `--desde` el comienzo de su período y, si no se quiere agrandar la tabla de la skill con años de historia, agregarlas a una copia (`--tabla <copia.csv>`) y correr la skill con `--eventos-capital <copia.csv>`. Los abonos sin comprobar de antes de las tablas llevan, en el reporte, el instrumento y la fecha que hay que pedir.
 3. Volver a correr la skill.
 
 Al terminar, informar por institución, desde la sección "Eventos de capital" del reporte, los abonos confirmados, identificados, por revisar, sin comprobar y dudosos por causa.
@@ -76,4 +76,4 @@ Las reglas están en `docs/eventos-capital.md`.
 
 ## Mantener la tabla maestra
 
-`datos/instrumentos.csv` se regenera desde uno o más exports de BICE con `python -m cartolas.catalogo "<carpeta del export>" ["<otra carpeta>" ...]`; si un nemotécnico aparece con nombres distintos, queda el del último día. Los instrumentos que no están en la tabla salen sin nemotécnico ni emisor y con un aviso en el reporte. Si la cartola nombra un instrumento distinto que el export, se agrega una fila a `datos/alias.csv` con el nombre de la cartola, la moneda y el nemotécnico.
+`datos/instrumentos.csv` se regenera desde uno o más exports de BICE con `python -m cartolas.catalogo "<carpeta del export>" ["<otra carpeta>" ...]`; si un nemotécnico aparece con nombres distintos, queda el del último día. Los instrumentos que no están en la tabla salen sin nemotécnico ni emisor y con un aviso en el reporte. Si la cartola nombra un instrumento distinto que el export, se agrega una fila a `datos/alias.csv` con el nombre de la cartola, la moneda y el nemotécnico. Si el export nombra un fondo con un nemotécnico distinto del que usan la Bolsa y DataFondos para sus repartos (las cuotas que el cliente tiene directo en la AGF, como `FIP-FI FULLY FUNDED-SERIE A` frente a `CFI-SPFFAE`), se agrega una fila a `datos/equivalencias.csv` con los dos.

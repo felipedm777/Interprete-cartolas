@@ -183,6 +183,7 @@ def test_sin_tabla_no_cambia_nada():
         ("REPARTO CAP.  $ 1.407,7626", ec.REPARTO, D("1407.7626")),
         ("DIVIDENDO INF US$ 0,019015694", ec.DIVIDENDO, D("0.019015694")),
         ("DISMINUCION DE CAPITAL $ 10", ec.DISMINUCION, D(10)),
+        ("REP. VOLUNTARIO $ 1362,4213", ec.REPARTO, D("1362.4213")),
         ("EMIS PAGO INF 1,457 X 1", ec.EMISION, None),
     ],
 )
@@ -324,3 +325,75 @@ def test_agrega_la_cobertura_que_devuelve_resumen_dividendos(tmp_path):
         45,
         date(2026, 10, 7),
     )
+
+
+# --- Cartolas con años de movimientos ------------------------------------------
+
+
+def test_un_fondo_vendido_antes_del_cierre_se_comprueba_con_las_cuotas_de_la_fecha_limite():
+    # Compró 100 cuotas de FONDO A y las vendió después de la fecha límite (23-09):
+    # al cierre no tiene cuotas, pero el dividendo de 2,5 por cuota le pagó 250.
+    titulos = [
+        ("COMPRA RV", "FONDO A", "CFI-A", 100, "10", 1000, date(2026, 9, 1)),
+        ("VENTA RV", "FONDO A", "CFI-A", 100, "11", 1100, date(2026, 9, 25)),
+    ]
+    con_instrumento = _cartola([], [("DIVIDENDO EN PESOS", 250, CIERRE, "CFI-A")], titulos)
+    assert ec.conciliar([con_instrumento], CATALOGO, TABLA).confirmados == 1
+    sin_instrumento = _cartola([], [("DIVIDENDO EN PESOS", 250, CIERRE, "")], titulos)
+    assert ec.conciliar([sin_instrumento], CATALOGO, TABLA).asignados == 1
+    assert sin_instrumento.movimientos_caja[0].instrumento == "CFI-A"
+
+
+def test_el_movimiento_de_titulos_con_el_mismo_numero_de_operacion_trae_la_fecha_del_evento():
+    # El abono llega tres semanas después del pago: la fecha que vale es la del
+    # movimiento de títulos con el mismo número de operación.
+    c = _cartola([], [], [("DIVIDENDO", "FONDO A", "CFI-A", 100, "2.5", 250, date(2026, 9, 29))])
+    c.movimientos_titulos[0].referencia = "7"
+    c.movimientos_caja = [MovimientoCaja(date(2026, 10, 20), "0", "DIVIDENDO EN PESOS", "CLP", D(0), D(250), "7", "CFI-A")]
+    assert ec.conciliar([c], CATALOGO, TABLA).confirmados == 1
+
+
+def test_avisa_cuando_el_monto_cuadra_con_un_evento_de_otra_clase():
+    # La cartola lo llama dividendo, pero lo que paga 1012 es la devolución de capital de 10,125.
+    c = _cartola([("FONDO A", 100)], [("DIVIDENDO EN PESOS", 1012, CIERRE, "CFI-A")])
+    resultado = ec.conciliar([c], CATALOGO, TABLA)
+    assert resultado.confirmados == 0
+    assert len(resultado.revisar) == 1 and "publicado como reparto de capital" in resultado.revisar[0]
+
+
+def test_un_fondo_que_el_export_nombra_distinto_se_busca_con_su_nemotecnico_de_bolsa():
+    # Las cuotas que el cliente tiene directo en la AGF van en el export como
+    # FIP-X; la Bolsa publica el reparto como CFI-X.
+    catalogo = Catalogo(
+        [Instrumento("FONDO X EN LA AGF", "FIP-X", "USD", "AGF", "FONDOS INVERSIÓN BICE", "SALDOS_FFMM")],
+        equivalencias={"FIP-X": "CFI-X"},
+    )
+    tabla = ec.Tabla(
+        [ec.Evento("", "CFI-X", ec.DIVIDENDO, "USD", D("0.027774815"), date(2026, 1, 14), date(2026, 1, 20))]
+    )
+    c = _cartola([("FONDO X EN LA AGF", 10000)], [])
+    c.posiciones[0].moneda = "USD"
+    c.movimientos_caja = [MovimientoCaja(date(2026, 1, 20), "0", "DIVIDENDO EN DOLARES", "USD", D(0), D("277.75"), instrumento="CFI-X")]
+    assert ec.conciliar([c], catalogo, tabla).confirmados == 1
+
+
+def test_una_disminucion_por_rescate_de_cuotas_se_comprueba_con_su_movimiento_de_titulos():
+    # Un reparto voluntario rescata 200 cuotas a 1377,7662: DataFondos lo publica
+    # con dos decimales y lo excluye del valor cuota (anulado), pero el cliente
+    # recibió el dinero.
+    tabla = ec.Tabla(
+        [ec.Evento("1", "CFI-A", ec.REPARTO, "CLP", D("1377.77"), date(2025, 10, 30), date(2025, 11, 7), anulado=True)]
+    )
+    c = _cartola(
+        [("FONDO A", 5000)],
+        [("DISMINUCION DE CAPITAL - ABONO EN CUENTA MERCANTIL", 275553, date(2025, 11, 7), "CFI-A")],
+        [("DISMINUCION DE CAPITAL", "FONDO A", "CFI-A", 200, "1377.7662", "275553.24", date(2025, 11, 7))],
+        formato="Valores Security",
+    )
+    assert ec.conciliar([c], CATALOGO, tabla).confirmados == 1
+
+
+def test_reconoce_el_tipo_de_caja_con_o_sin_tilde():
+    assert ec.tipo_caja("ABONO A CUENTA CORRIENTE DISMINUCIÓN DE CAPITAL") == (ec.DISMINUCION, "")
+    assert ec.tipo_caja("ABONO A CUENTA CORRIENTE DISMINUCION DE CAPITAL") == (ec.DISMINUCION, "")
+    assert ec.tipo_caja("RETIRO") is None
