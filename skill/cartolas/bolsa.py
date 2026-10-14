@@ -211,10 +211,15 @@ def leer(ruta: Path) -> Lectura:
         raise RuntimeError("leer el Excel de la Bolsa necesita openpyxl: pip install openpyxl") from None
     import warnings
 
+    from openpyxl.utils.exceptions import InvalidFileException
+
     with warnings.catch_warnings():
         # El Excel trae áreas de impresión que openpyxl no entiende.
         warnings.simplefilter("ignore")
-        libro = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+        try:
+            libro = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+        except (zipfile.BadZipFile, InvalidFileException, KeyError) as e:
+            raise ValueError(f"{ruta.name} no se pudo abrir como Excel: {e}") from None
     try:
         al = _fecha_excel(ruta, libro)
         faltan = [h for h in HOJAS if h not in libro.sheetnames]
@@ -322,6 +327,12 @@ def tabla_vigente(carpeta: Path = CARPETA_DATOS) -> Path | None:
     return tablas[-1] if tablas else None
 
 
+def fecha_vigente(carpeta: Path = CARPETA_DATOS) -> date | None:
+    """Fecha del Excel del que salió la tabla de la Bolsa de la skill."""
+    ruta = tabla_vigente(carpeta)
+    return _fecha_tabla(ruta) if ruta else None
+
+
 def _fecha_tabla(ruta: Path) -> date | None:
     m = re.search(r"(\d{8})", ruta.stem)
     return datetime.strptime(m.group(1), "%Y%m%d").date() if m else None
@@ -349,6 +360,36 @@ def escribir(lectura: Lectura, desde: date | None, carpeta: Path = CARPETA_DATOS
         if anterior != ruta:
             anterior.unlink()
     return ruta
+
+
+def desde_por_defecto(al: date) -> date:
+    """Desde cuándo guardar los eventos de un Excel: el 1 de enero del año
+    anterior, para cubrir las cartolas del año pasado sin cargar los de 2022."""
+    return date(al.year - 1, 1, 1)
+
+
+def cuadra(lectura: Lectura, desde: date, ruta: Path) -> tuple[bool, int, int]:
+    """Si la tabla escrita, vuelta a leer, trae los mismos eventos que el Excel
+    pagados desde `desde`, y cuántos tiene cada uno."""
+    esperados = Counter(_clave(e) for e in lectura.eventos if e.fecha_pago >= desde)
+    leidos = Counter(_clave(e) for e in cargar(ruta).eventos)
+    return esperados == leidos, sum(esperados.values()), sum(leidos.values())
+
+
+def actualizar(carpeta: Path, tabla: Path = CARPETA_DATOS, hasta: date | None = None) -> tuple[Path, Lectura]:
+    """Baja el Excel más reciente a `carpeta` y reemplaza con él la tabla de la
+    Bolsa de la skill. Falla con RuntimeError si no lo puede bajar, leer, o si
+    la tabla escrita no cuadra con el Excel."""
+    try:
+        lectura = leer(descargar(carpeta, hasta))
+    except (OSError, ValueError) as e:
+        raise RuntimeError(str(e)) from e
+    desde = desde_por_defecto(lectura.al)
+    ruta = escribir(lectura, desde, tabla)
+    iguales, esperados, _ = cuadra(lectura, desde, ruta)
+    if not iguales:
+        raise RuntimeError(f"la tabla escrita en {ruta} no cuadra con los {esperados} eventos del Excel")
+    return ruta, lectura
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -383,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, ValueError, OSError) as e:
         parser.error(str(e))
 
-    desde = date.fromisoformat(args.desde) if args.desde else date(lectura.al.year - 1, 1, 1)
+    desde = date.fromisoformat(args.desde) if args.desde else desde_por_defecto(lectura.al)
     ruta = escribir(lectura, desde, Path(args.tabla))
     print(f"Excel de la Bolsa del {lectura.al:%d-%m-%Y}:")
     for h in lectura.hojas:
@@ -397,14 +438,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(lectura.eventos)} eventos: " + ", ".join(f"{c.lower()} {n}" for c, n in clases.most_common()))
 
     # La tabla escrita, vuelta a leer, tiene que traer los mismos eventos.
-    esperados = Counter(_clave(e) for e in lectura.eventos if e.fecha_pago >= desde)
-    leidos = Counter(_clave(e) for e in cargar(ruta).eventos)
-    cuadra = esperados == leidos
+    iguales, esperados, leidos = cuadra(lectura, desde, ruta)
     print(
-        f"{sum(leidos.values())} eventos pagados desde el {desde:%d-%m-%Y} en {ruta}: "
-        + ("cuadran con el Excel." if cuadra else f"NO CUADRAN con los {sum(esperados.values())} del Excel.")
+        f"{leidos} eventos pagados desde el {desde:%d-%m-%Y} en {ruta}: "
+        + ("cuadran con el Excel." if iguales else f"NO CUADRAN con los {esperados} del Excel.")
     )
-    return 0 if cuadra else 1
+    return 0 if iguales else 1
 
 
 def _clave(e: ec.Evento) -> tuple:

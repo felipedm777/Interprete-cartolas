@@ -35,14 +35,14 @@ python -m cartolas "<carpeta con las cartolas>" --salida "<carpeta de salida>"
 
 Deja en la carpeta de salida un juego de 7 CSV por institución y un reporte con las cuadraturas que no cierran y lo que no se pudo exportar. La salida tiene datos de clientes: no va al repositorio.
 
-Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban contra los que publican la Bolsa de Santiago y DataFondos: eso identifica el instrumento de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que las tablas no explican queda como caja y se informa en el reporte con su causa. La tabla de la Bolsa sale del Excel de dividendos y repartos que publica cada día; antes de exportar conviene bajar el más reciente (necesita internet y `pip install openpyxl`):
+Los abonos por eventos de capital (dividendos, repartos y disminuciones de capital) se comprueban contra los que publican la Bolsa de Santiago y DataFondos: eso identifica el instrumento de los abonos que no lo traen y distingue un dividendo de una devolución de capital. Lo que las tablas no explican queda como caja y se informa en el reporte con su causa.
 
-```
-cd skill
-python -m cartolas.bolsa
-```
+Cada corrida pone al día esas tablas antes de conciliar:
 
-Si Claude Code tiene conectado el MCP de DataFondos, la skill le indica consultar los fondos que la Bolsa no publica y volver a correr ("Eventos de capital con la Bolsa y DataFondos" en `skill/SKILL.md`). Las reglas y lo que alcanza a cubrir están en `docs/eventos-capital.md`.
+- **Bolsa:** si la tabla es anterior al último cierre de las cartolas, baja el Excel de dividendos y repartos más reciente de la Bolsa (necesita internet y `pip install openpyxl`). También se puede bajar a mano con `python -m cartolas.bolsa`.
+- **DataFondos:** si están las variables de entorno `DATAFONDOS_API_URL` y `DATAFONDOS_API_KEY`, consulta la API de DataFondosv2 (la misma que usa su MCP) por los fondos que le faltan a la tabla. Ver "Conectar DataFondos" más abajo.
+
+Si no puede bajar o consultar algo, sigue con las tablas que trae la skill y el reporte dice qué faltó. `--sin-internet` no baja ni consulta nada. Las reglas y lo que alcanza a cubrir están en `docs/eventos-capital.md`.
 
 Para comparar la salida con un export de BICE del mismo día, fila por fila:
 
@@ -65,4 +65,26 @@ Conviene instalarla en el computador donde están las cartolas: Claude Code la c
    Tiene que quedar `.../skills/interprete-cartolas/SKILL.md` junto a `.../skills/interprete-cartolas/cartolas/`.
 4. Abrir Claude Code en la carpeta de las cartolas y pedirle, por ejemplo, "exporta las cartolas de esta carpeta al formato del SFTP". Claude encuentra la skill por la descripción de su `SKILL.md`.
 
-Para actualizarla, bajar de nuevo el repositorio (`git pull`) y volver a copiar la carpeta `skill`. La tabla maestra de instrumentos (`cartolas/datos/instrumentos.csv`) viene incluida; para agregarle instrumentos nuevos, ver "Mantener la tabla maestra" en `skill/SKILL.md`.
+Para actualizarla, bajar de nuevo el repositorio (`git pull`) y volver a copiar la carpeta `skill`. La copia instalada no se actualiza sola con el repositorio. La tabla maestra de instrumentos (`cartolas/datos/instrumentos.csv`) viene incluida; para agregarle instrumentos nuevos, ver "Mantener la tabla maestra" en `skill/SKILL.md`.
+
+## Conectar DataFondos
+
+La skill consulta la API de solo lectura de DataFondosv2 (`/api/v1`) con dos variables de entorno, las mismas que usa el MCP de DataFondosv2:
+
+| Variable | Qué es |
+|---|---|
+| `DATAFONDOS_API_URL` | La URL de la API, con o sin `/api/v1` al final. |
+| `DATAFONDOS_API_KEY` | Una API key nominal con el scope `valores:read`. |
+| `DATAFONDOS_TIMEOUT` | Opcional: segundos por consulta (20 por defecto). |
+
+1. Crear la key en la terminal del contenedor de Gestión de DataFondosv2 (en Coolify: el recurso → *Terminal*). La entrega una sola vez:
+
+   ```
+   python scripts/manage_api_keys.py create --consumer interprete-cartolas --scope valores:read --expires-at 2027-10-14
+   ```
+
+   Con nombre propio y vencimiento se puede revocar o renovar sin tocar las keys de los demás consumidores.
+2. En el computador donde corre la skill, guardarlas como variables de entorno del usuario. En Windows, en *Editar las variables de entorno de esta cuenta*: así la key no queda en el historial de ninguna terminal. Después cerrar y volver a abrir la app de Claude o la terminal: las variables nuevas solo las ven los programas que se abren después.
+3. Comprobar la conexión desde la carpeta de la skill: `python -m cartolas.datafondos` actualiza la cobertura e informa cuántos fondos sigue DataFondos.
+
+La key no va en ningún archivo del repositorio ni de la skill. A DataFondos solo se le envían el RUT y el nemotécnico de fondos, nunca datos de clientes. Sin las variables, la skill funciona igual con las tablas que trae y, si Claude Code tiene el conector de DataFondos, `skill/SKILL.md` le indica cómo consultarlo por el MCP.

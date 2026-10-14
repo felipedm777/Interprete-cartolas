@@ -471,8 +471,23 @@ def conciliar(
     return total
 
 
+def pendientes(
+    cartolas: list[Cartola],
+    catalogo: Catalogo,
+    tabla: Tabla,
+    cobertura: Cobertura | None = None,
+) -> set[tuple[str, str]]:
+    """Fondos y meses que la conciliación pediría consultar en DataFondos, sin
+    tocar las cartolas: sirve para consultarlos antes de conciliar."""
+    cobertura = cobertura or Cobertura([])
+    total: set[tuple[str, str]] = set()
+    for cartola in cartolas:
+        total |= _conciliar_cartola(cartola, catalogo, tabla, cobertura, asignar=False).pendientes
+    return total
+
+
 def _conciliar_cartola(
-    cartola: Cartola, catalogo: Catalogo, tabla: Tabla, cobertura: Cobertura
+    cartola: Cartola, catalogo: Catalogo, tabla: Tabla, cobertura: Cobertura, asignar: bool = True
 ) -> Conciliacion:
     resultado = Conciliacion()
     if not len(tabla):
@@ -522,7 +537,8 @@ def _conciliar_cartola(
             continue
         candidatos = sorted({n for n, _ in explican})
         if len(candidatos) == 1:
-            m.instrumento = candidatos[0]
+            if asignar:
+                m.instrumento = candidatos[0]
             resultado.asignados += 1
             continue
         if candidatos:
@@ -719,6 +735,43 @@ def _desde_json(datos: object) -> list[Evento]:
     return eventos
 
 
+def agregar_cobertura(seguidos: list[Seguido], ruta: Path = RUTA_COBERTURA) -> Cobertura:
+    """Agrega a la cobertura los fondos de un `resumen_dividendos` y la escribe.
+
+    Cada resumen trae todos los fondos que sigue DataFondos: el más nuevo de
+    cada fondo reemplaza al que había.
+    """
+    por_nemo = {x.nemotecnico.upper(): x for x in Cobertura.cargar(ruta).seguidos}
+    por_nemo.update({x.nemotecnico.upper(): x for x in seguidos})
+    cobertura = Cobertura(list(por_nemo.values()))
+    escribir_cobertura(cobertura.seguidos, ruta)
+    return cobertura
+
+
+def agregar_eventos(
+    nuevos: list[Evento],
+    ruta: Path = RUTA_TABLA,
+    desde: date | None = None,
+    reemplazar: bool = False,
+) -> tuple[list[Evento], int]:
+    """Agrega a la tabla los eventos de respuestas de `dividendos`, sin
+    repetir los que ya tenía, y la escribe. Con `desde`, no agrega los pagados
+    antes de esa fecha (los que ya tenía la tabla se mantienen). Devuelve la
+    tabla escrita y cuántos eventos agregó."""
+    tenia = [] if reemplazar else Tabla.cargar(ruta).eventos
+    if desde:
+        nuevos = [e for e in nuevos if e.fecha_pago and e.fecha_pago >= desde]
+    eventos: list[Evento] = []
+    vistos = set()
+    for e in tenia + nuevos:
+        if not e.nemotecnico or _clave(e) in vistos:
+            continue
+        vistos.add(_clave(e))
+        eventos.append(e)
+    escribir(eventos, ruta)
+    return eventos, len(eventos) - len(tenia)
+
+
 def _texto_monto(valor: Decimal | None) -> str:
     # Sin notación científica: 1E-7 no se podría volver a leer.
     return format(valor, "f").replace(".", ",") if valor is not None else ""
@@ -778,7 +831,6 @@ def main(argv: list[str] | None = None) -> int:
 
     ruta = Path(args.tabla)
     desde = date.fromisoformat(args.desde) if args.desde else None
-    tenia = [] if args.reemplazar else Tabla.cargar(ruta).eventos
     nuevos: list[Evento] = []
     seguidos: list[Seguido] = []
     con_eventos = 0
@@ -796,12 +848,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if seguidos:
         ruta_cobertura = Path(args.cobertura)
-        # Cada resumen trae todos los fondos que sigue DataFondos: el más nuevo
-        # de cada fondo reemplaza al que había.
-        por_nemo = {x.nemotecnico.upper(): x for x in Cobertura.cargar(ruta_cobertura).seguidos}
-        por_nemo.update({x.nemotecnico.upper(): x for x in seguidos})
-        cobertura = Cobertura(list(por_nemo.values()))
-        escribir_cobertura(cobertura.seguidos, ruta_cobertura)
+        cobertura = agregar_cobertura(seguidos, ruta_cobertura)
         print(
             f"Cobertura: {len(cobertura)} fondos en {ruta_cobertura}, actualizada al "
             f"{cobertura.actualizada()}"
@@ -809,25 +856,13 @@ def main(argv: list[str] | None = None) -> int:
     if not con_eventos:
         return 0
 
-    leidos = len(nuevos)
-    if desde:
-        nuevos = [e for e in nuevos if e.fecha_pago and e.fecha_pago >= desde]
-    eventos: list[Evento] = []
-    vistos = set()
-    for e in tenia + nuevos:
-        if not e.nemotecnico:
-            continue
-        if _clave(e) in vistos:
-            continue
-        vistos.add(_clave(e))
-        eventos.append(e)
-    escribir(eventos, ruta)
+    eventos, agregados = agregar_eventos(nuevos, ruta, desde, args.reemplazar)
     periodo = Tabla(eventos).periodo()
     print(
         f"{len(eventos)} eventos en {ruta}"
         + (f", pagos del {periodo[0]} al {periodo[1]}" if periodo else "")
     )
-    print(f"{leidos} leídos de {con_eventos} respuestas; {len(eventos) - len(tenia)} nuevos.")
+    print(f"{len(nuevos)} leídos de {con_eventos} respuestas; {agregados} nuevos.")
     return 0
 
 
